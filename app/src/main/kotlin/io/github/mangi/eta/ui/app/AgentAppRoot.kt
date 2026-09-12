@@ -306,7 +306,7 @@ fun AgentAppRoot(
                                 is AgentHomeAction.ModelSelected -> agentState.selectModel(action.modelId)
                                 is AgentHomeAction.SubmitMessage -> { requestExecutionNotifications(); agentState.sendCurrentMessage(action.text) }
                                 AgentHomeAction.StopRun -> agentState.stopCurrentRun()
-                                is AgentHomeAction.ImageAttached -> agentState.attachImage(action.uri)
+                                is AgentHomeAction.ImageAttached -> agentState.attachImages(action.uris)
                                 is AgentHomeAction.RemoveImage -> agentState.removePendingImage(action.id)
                                 is AgentHomeAction.FilesAttached -> agentState.attachFiles(action.uris)
                                 is AgentHomeAction.FolderAttached -> agentState.attachFolder(action.uri)
@@ -358,7 +358,7 @@ fun AgentAppRoot(
                                 is AgentChatAction.SubmitMessage -> { requestExecutionNotifications(); agentState.sendCurrentMessage(action.text) }
                                 AgentChatAction.StopRun -> agentState.stopCurrentRun()
                                 AgentChatAction.OpenBrowser -> pushRoute(AppRoute.Browser)
-                                is AgentChatAction.ImageAttached -> agentState.attachImage(action.uri)
+                                is AgentChatAction.ImageAttached -> agentState.attachImages(action.uris)
                                 is AgentChatAction.RemoveImage -> agentState.removePendingImage(action.id)
                                 is AgentChatAction.FilesAttached -> agentState.attachFiles(action.uris)
                                 is AgentChatAction.FolderAttached -> agentState.attachFolder(action.uri)

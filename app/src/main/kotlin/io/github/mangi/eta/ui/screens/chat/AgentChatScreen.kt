@@ -40,7 +40,7 @@ internal fun AgentChatScreen(
             onModelSelected = { onAction(AgentChatAction.ModelSelected(it)) },
             onSubmit = { text -> onAction(AgentChatAction.SubmitMessage(text)) },
             onStop = { onAction(AgentChatAction.StopRun) },
-            onAttachImage = { uri -> onAction(AgentChatAction.ImageAttached(uri)) },
+            onAttachImages = { uris -> onAction(AgentChatAction.ImageAttached(uris)) },
             onRemoveImage = { id -> onAction(AgentChatAction.RemoveImage(id)) },
             onAttachFiles = { uris -> onAction(AgentChatAction.FilesAttached(uris)) },
             onAttachFolder = { uri -> onAction(AgentChatAction.FolderAttached(uri)) },

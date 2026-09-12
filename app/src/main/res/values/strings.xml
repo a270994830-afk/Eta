@@ -1181,4 +1181,9 @@
   <string name="context_compaction">Context compaction</string>
   <string name="context_compact_action">Compact context</string>
   <string name="context_usage_estimated">%1$s\nEstimated after compaction</string>
+  <string name="hotword_channel_name">Voice wake-up</string>
+  <string name="hotword_notification_title">Eta voice wake-up</string>
+  <string name="hotword_notification_text">Listening for “%1$s”</string>
+  <string name="settings_hotword_title">Voice wake-up</string>
+  <string name="settings_hotword_summary">Listen offline for the wake word (default “小爱同学”) and open the Eta voice assistant when it is spoken.</string>
 </resources>

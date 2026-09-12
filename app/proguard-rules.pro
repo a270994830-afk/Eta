@@ -59,3 +59,8 @@
 # 不在 App 层重复保留整个类或包，避免阻断裁剪、内联和混淆。
 # 保留源码与行号属性，便于使用 release mapping 还原线上堆栈。
 -keepattributes SourceFile,LineNumberTable
+
+# ── Porcupine（语音唤醒）──────────────────────────────────────────────────
+# Porcupine 通过 JNI/反射加载 native 与接口，R8 无法静态识别引用。
+-keep class ai.picovoice.** { *; }
+-dontwarn ai.picovoice.**

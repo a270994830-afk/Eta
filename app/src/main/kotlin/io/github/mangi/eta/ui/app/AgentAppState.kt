@@ -1429,44 +1429,52 @@ internal class AgentAppState(
         ).show()
     }
 
-    fun attachImage(uri: String) {
+    fun attachImages(uris: List<String>) {
+        if (uris.isEmpty()) return
         scope.launch(Dispatchers.IO) {
-            try {
-                val image = AgentImageCodec.fromReference(
-                    context = appContext,
-                    value = uri,
-                    source = "user_attach",
-                )
-                if (image == null) {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(
-                            appContext,
-                            appContext.getString(R.string.state_ui_unable_to_read_this_image_please_try_again_or_us_d94978),
-                            Toast.LENGTH_SHORT,
-                        ).show()
+            val attached = mutableListOf<PendingImageUi>()
+            var anyFailed = false
+            for (uri in uris) {
+                try {
+                    val image = AgentImageCodec.fromReference(
+                        context = appContext,
+                        value = uri,
+                        source = "user_attach",
+                    )
+                    if (image == null) {
+                        anyFailed = true
+                        continue
                     }
-                    return@launch
-                }
-                val preview = AgentImageCodec.previewFromReference(appContext, image) ?: image
-                val pending = PendingImageUi(
-                    id = "img-${UUID.randomUUID()}",
-                    // 后续发送使用首次读取后的稳定引用，不再依赖 ROM Photo Picker URI 的授权生命周期。
-                    uri = image.reference,
-                    dataUrl = preview.reference,
-                    mimeType = image.mimeType,
-                )
-                withContext(Dispatchers.Main) {
-                    updateCurrentConversation(homeState.copy(pendingImages = homeState.pendingImages + pending))
-                }
-            } finally {
-                val selectedUri = Uri.parse(uri)
-                if (selectedUri.scheme == ContentResolver.SCHEME_CONTENT) {
-                    runCatching {
-                        appContext.contentResolver.releasePersistableUriPermission(
-                            selectedUri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                        )
+                    val preview = AgentImageCodec.previewFromReference(appContext, image) ?: image
+                    attached += PendingImageUi(
+                        id = "img-${UUID.randomUUID()}",
+                        // 后续发送使用首次读取后的稳定引用，不再依赖 ROM Photo Picker URI 的授权生命周期。
+                        uri = image.reference,
+                        dataUrl = preview.reference,
+                        mimeType = image.mimeType,
+                    )
+                } finally {
+                    val selectedUri = Uri.parse(uri)
+                    if (selectedUri.scheme == ContentResolver.SCHEME_CONTENT) {
+                        runCatching {
+                            appContext.contentResolver.releasePersistableUriPermission(
+                                selectedUri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                            )
+                        }
                     }
+                }
+            }
+            withContext(Dispatchers.Main) {
+                if (attached.isNotEmpty()) {
+                    updateCurrentConversation(homeState.copy(pendingImages = homeState.pendingImages + attached))
+                }
+                if (anyFailed) {
+                    Toast.makeText(
+                        appContext,
+                        appContext.getString(R.string.state_ui_unable_to_read_this_image_please_try_again_or_us_d94978),
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 }
             }
         }

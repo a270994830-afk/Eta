@@ -18,7 +18,7 @@ val hasReleaseSigning = listOf(
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(17)
     }
 }
 
@@ -31,6 +31,9 @@ android {
         applicationId = "io.github.mangi.eta"
         minSdk = 34
         targetSdk = 36
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
         versionCode = 2026091202
         versionName = "3.0.4"
@@ -64,8 +67,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_25
-        targetCompatibility = JavaVersion.VERSION_25
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     buildFeatures {
@@ -140,6 +143,9 @@ dependencies {
 
     // Coroutines：显式引入，避免依赖传递版本不确定
     implementation(libs.kotlinx.coroutines.android)
+
+    // Porcupine：轻量语音唤醒词检测（EtaHotwordService）
+    implementation("ai.picovoice:porcupine-android:4.0.2")
 
     testImplementation(libs.junit)
     testImplementation(libs.json)

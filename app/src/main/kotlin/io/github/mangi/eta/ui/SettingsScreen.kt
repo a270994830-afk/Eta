@@ -56,6 +56,7 @@ import io.github.mangi.eta.EtaApp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.accessibility.AccessibilityProtectionClient
 import io.github.mangi.eta.agent.accessibility.AgentAccessibilityService
+import io.github.mangi.eta.agent.voice.EtaHotwordService
 import io.github.mangi.eta.config.PowerAssistantTarget
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.data.repository.ProviderRepository
@@ -156,6 +157,21 @@ internal fun SettingsScreen(
     // LSPosed 数据库）；未就绪时保持 null，UI 禁止修改。
     var prefs by remember { mutableStateOf(Prefs.remotePreferencesForUi(EtaApp.serviceInstance)) }
     val agentPrefs = remember { Prefs.localAgentPreferences() }
+    // 本地开关（不依赖 LSPosed）：切换时启停语音唤醒前台服务。
+    DisposableEffect(agentPrefs) {
+        val targetPrefs = agentPrefs ?: return@DisposableEffect onDispose {}
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { changedPrefs, key ->
+            if (key == Prefs.Keys.ETA_HOTWORD_ENABLED) {
+                if (changedPrefs.getBoolean(key, false)) {
+                    EtaHotwordService.start(context.applicationContext)
+                } else {
+                    EtaHotwordService.stop(context.applicationContext)
+                }
+            }
+        }
+        targetPrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { targetPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
     var powerAssistantTarget by remember(prefs) {
         mutableStateOf(prefs?.let(Prefs::powerAssistantTarget) ?: enhancementHistory.powerTarget())
     }
@@ -352,6 +368,14 @@ internal fun SettingsScreen(
                             )
                         },
                         onClick = openAssistantSettings,
+                    )
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.settings_hotword_title),
+                        summary = stringResource(R.string.settings_hotword_summary),
+                        key = Prefs.Keys.ETA_HOTWORD_ENABLED,
+                        icon = Icons.Rounded.Mic,
                     )
                     if (prefs != null || hasConnectedFramework) {
                         WindowSpinnerPreference(

@@ -119,7 +119,7 @@ internal fun AgentChatInputBar(
     onModelSelected: (String) -> Unit,
     onSubmit: (String) -> Unit,
     onStop: () -> Unit,
-    onAttachImage: (String) -> Unit,
+    onAttachImages: (List<String>) -> Unit,
     onRemoveImage: (String) -> Unit,
     onAttachFiles: (List<String>) -> Unit,
     onAttachFolder: (String) -> Unit,
@@ -293,7 +293,7 @@ internal fun AgentChatInputBar(
                             AgentAttachmentPickerButton(
                                 popupAnchorTopPx = inputContainerTopPx,
                                 popupMaxHeight = thinkingPopupMaxHeight,
-                                onAttachImage = onAttachImage,
+                                onAttachImages = onAttachImages,
                                 onAttachFiles = onAttachFiles,
                                 onAttachFolder = onAttachFolder,
                                 onAttachFilePath = onAttachFilePath,

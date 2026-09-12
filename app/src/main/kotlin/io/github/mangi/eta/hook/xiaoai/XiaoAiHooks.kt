@@ -119,7 +119,13 @@ internal object XiaoAiHooks {
         ) { chain ->
             val context = chain.thisObject as? Context
             val versionCode = context?.let(::packageVersionCode) ?: -1L
-            if (XiaoAiTakeoverPolicy.isSupportedVersion(versionCode)) {
+            if (XiaoAiV8Hooks.isSupportedVersion(versionCode)) {
+                installV8HooksOnce(
+                    module = module,
+                    rootLogger = rootLogger,
+                    classLoader = classLoader,
+                )
+            } else if (XiaoAiTakeoverPolicy.isSupportedVersion(versionCode)) {
                 installBusinessHooksOnce(
                     module = module,
                     rootLogger = rootLogger,
@@ -132,6 +138,21 @@ internal object XiaoAiHooks {
             }
             chain.proceed()
         }
+    }
+
+    private fun installV8HooksOnce(
+        module: XposedModule,
+        rootLogger: ModuleLogger,
+        classLoader: ClassLoader,
+    ) {
+        if (!businessHooksInstalled.compareAndSet(false, true)) return
+        val installation = XiaoAiV8Hooks.install(
+            module = module,
+            rootLogger = rootLogger,
+            classLoader = classLoader,
+        )
+        deferredHookHandles += installation.handles
+        rootLogger.scoped("XiaoAiV8").info(installation.report.summary())
     }
 
     private fun installBusinessHooksOnce(

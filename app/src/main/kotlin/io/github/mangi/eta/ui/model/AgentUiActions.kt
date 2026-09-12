@@ -8,7 +8,7 @@ sealed interface AgentHomeAction {
     data class ModelSelected(val modelId: String) : AgentHomeAction
     data class SubmitMessage(val text: String) : AgentHomeAction
     data object StopRun : AgentHomeAction
-    data class ImageAttached(val uri: String) : AgentHomeAction
+    data class ImageAttached(val uris: List<String>) : AgentHomeAction
     data class RemoveImage(val id: String) : AgentHomeAction
     data class FilesAttached(val uris: List<String>) : AgentHomeAction
     data class FolderAttached(val uri: String) : AgentHomeAction
@@ -41,7 +41,7 @@ sealed interface AgentChatAction {
     data class SubmitMessage(val text: String) : AgentChatAction
     data object StopRun : AgentChatAction
     data object OpenBrowser : AgentChatAction
-    data class ImageAttached(val uri: String) : AgentChatAction
+    data class ImageAttached(val uris: List<String>) : AgentChatAction
     data class RemoveImage(val id: String) : AgentChatAction
     data class FilesAttached(val uris: List<String>) : AgentChatAction
     data class FolderAttached(val uri: String) : AgentChatAction

@@ -46,6 +46,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.CancelPresentation
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DesktopWindows
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -120,6 +121,7 @@ internal data class EtaVoiceUiState(
 internal sealed interface EtaVoiceStatus {
     data object InputRequest : EtaVoiceStatus
     data object Reasoning : EtaVoiceStatus
+    data object Listening : EtaVoiceStatus
     data object Completed : EtaVoiceStatus
     data class RunningTool(val name: String) : EtaVoiceStatus
     data class Failed(val detail: String?) : EtaVoiceStatus
@@ -207,6 +209,8 @@ internal fun EtaVoicePanel(
     inputFocusRequestKey: Int,
     canOpenConversation: Boolean,
     exitRequested: Boolean,
+    isListening: Boolean,
+    onVoiceToggle: () -> Unit,
     onInputChange: (String) -> Unit,
     onScreenContextSelect: () -> Unit,
     onScreenContextRemove: () -> Unit,
@@ -284,6 +288,8 @@ internal fun EtaVoicePanel(
                 maxContentHeightPx = maxContentHeightPx,
                 bottomInsetPx = bottomInset,
                 imeOverlapPx = imeOverlap,
+                isListening = isListening,
+                onVoiceToggle = onVoiceToggle,
                 onInputChange = onInputChange,
                 onScreenContextSelect = onScreenContextSelect,
                 onScreenContextRemove = onScreenContextRemove,
@@ -310,6 +316,8 @@ private fun BoxScope.AssistantPanel(
     maxContentHeightPx: Float,
     bottomInsetPx: Int,
     imeOverlapPx: Int,
+    isListening: Boolean,
+    onVoiceToggle: () -> Unit,
     onInputChange: (String) -> Unit,
     onScreenContextSelect: () -> Unit,
     onScreenContextRemove: () -> Unit,
@@ -568,6 +576,8 @@ private fun BoxScope.AssistantPanel(
             input = input,
             colors = colors,
             focusRequester = focusRequester,
+            isListening = isListening,
+            onVoiceToggle = onVoiceToggle,
             onInputChange = onInputChange,
             onScreenContextSelect = onScreenContextSelect,
             onScreenContextRemove = onScreenContextRemove,
@@ -591,6 +601,8 @@ private fun AssistantComposer(
     input: String,
     colors: EtaVoicePanelColors,
     focusRequester: FocusRequester,
+    isListening: Boolean,
+    onVoiceToggle: () -> Unit,
     onInputChange: (String) -> Unit,
     onScreenContextSelect: () -> Unit,
     onScreenContextRemove: () -> Unit,
@@ -618,6 +630,8 @@ private fun AssistantComposer(
             input = input,
             colors = colors,
             focusRequester = focusRequester,
+            isListening = isListening,
+            onVoiceToggle = onVoiceToggle,
             onInputChange = onInputChange,
             onSubmit = onSubmit,
             onStop = onStop,
@@ -788,6 +802,8 @@ private fun AssistantInputBar(
     input: String,
     colors: EtaVoicePanelColors,
     focusRequester: FocusRequester,
+    isListening: Boolean,
+    onVoiceToggle: () -> Unit,
     onInputChange: (String) -> Unit,
     onSubmit: () -> Unit,
     onStop: () -> Unit,
@@ -828,7 +844,11 @@ private fun AssistantInputBar(
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (input.isEmpty()) {
                         Text(
-                            text = stringResource(R.string.voice_input_hint),
+                            text = if (isListening) {
+                                "正在聆听…"
+                            } else {
+                                stringResource(R.string.voice_input_hint)
+                            },
                             color = colors.inputTertiary,
                             fontSize = 14.sp,
                             maxLines = 1,
@@ -855,6 +875,24 @@ private fun AssistantInputBar(
                 )
             }
         } else {
+            IconButton(
+                onClick = onVoiceToggle,
+                minWidth = 36.dp,
+                minHeight = 36.dp,
+                cornerRadius = 18.dp,
+                backgroundColor = if (isListening) {
+                    MiuixTheme.colorScheme.error
+                } else {
+                    colors.inputTertiary.copy(alpha = 0.25f)
+                },
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Mic,
+                    contentDescription = "语音输入",
+                    modifier = Modifier.size(17.dp),
+                    tint = if (isListening) Color.White else colors.inputSecondary,
+                )
+            }
             IconButton(
                 onClick = onSubmit,
                 enabled = canSubmit,

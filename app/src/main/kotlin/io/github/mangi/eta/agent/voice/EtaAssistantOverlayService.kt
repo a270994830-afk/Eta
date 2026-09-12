@@ -7,9 +7,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -42,6 +46,7 @@ import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentExternalArchivePayload
 import io.github.mangi.eta.agent.runtime.AgentRuntimeClient
 import io.github.mangi.eta.agent.runtime.AgentRuntimeWire
+import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.ui.MainActivity
 import io.github.mangi.eta.ui.app.AgentAppTheme
@@ -108,6 +113,11 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
     private var inputText by mutableStateOf("")
     private var inputFocusRequestKey by mutableIntStateOf(-1)
     private var uiState by mutableStateOf(EtaVoiceUiState())
+    private var voiceSessionMode = false
+    private var voiceListening = false
+    private var voiceTurnSerial = 0L
+    private var pendingInitialQuery: String? = null
+    private var speechRecognizer: SpeechRecognizer? = null
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
     override val savedStateRegistry: SavedStateRegistry
@@ -124,9 +134,16 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_SHOW -> showEntry()
+            ACTION_SHOW -> {
+                voiceSessionMode = intent?.getBooleanExtra(EXTRA_VOICE_MODE, false) ?: false
+                pendingInitialQuery = intent?.getStringExtra(EXTRA_INITIAL_QUERY)
+                showEntry()
+            }
             ACTION_HANDOFF_READY -> finishHandoff()
-            else -> showEntry()
+            else -> {
+                voiceSessionMode = intent?.getBooleanExtra(EXTRA_VOICE_MODE, false) ?: false
+                showEntry()
+            }
         }
         return START_NOT_STICKY
     }
@@ -243,7 +260,24 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
             stopSelf()
             return
         }
-        showKeyboard()
+        if (voiceSessionMode) {
+            updateSoftInput(visible = false)
+            val initial = pendingInitialQuery?.takeIf { it.isNotBlank() }
+            pendingInitialQuery = null
+            if (initial != null) {
+                submitPrompt(initial)
+            } else {
+                startVoiceListening()
+            }
+        } else {
+            val initial = pendingInitialQuery?.takeIf { it.isNotBlank() }
+            pendingInitialQuery = null
+            if (initial != null) {
+                submitPrompt(initial)
+            } else {
+                showKeyboard()
+            }
+        }
     }
 
     private fun showWindow() {
@@ -263,6 +297,8 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                         state = uiState,
                         input = inputText,
                         inputFocusRequestKey = inputFocusRequestKey,
+                        isListening = voiceListening,
+                        onVoiceToggle = ::toggleVoiceListening,
                         onInputChange = { inputText = it },
                         onScreenContextSelect = ::selectScreenContext,
                         onScreenContextRemove = ::removeScreenContext,
@@ -441,13 +477,19 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                 hiddenForForegroundOperation
             }
             runtimeClient.ackResult(runId)
-            if (shouldStopAfterResult) {
+            val resumeVoice = withContext(Dispatchers.Main.immediate) {
+                if (activeRunId != null) return@withContext false
+                voiceSessionMode && !voiceListening
+            }
+            if (shouldStopAfterResult && !resumeVoice) {
                 withContext(Dispatchers.Main.immediate) {
                     if (activeRunId == null) {
                         removeWindow()
                         stopSelf()
                     }
                 }
+            } else if (resumeVoice) {
+                scheduleNextVoiceTurn()
             }
         }
     }
@@ -761,6 +803,141 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
         }
     }
 
+    private fun startVoiceListening() {
+        if (voiceListening || activeRunId != null) return
+        val recognizer = SystemSpeechRecognizer.create(this)
+        if (recognizer == null) {
+            uiState = uiState.copy(
+                phase = EtaVoicePhase.ERROR,
+                status = EtaVoiceStatus.Failed("语音识别服务不可用"),
+            )
+            return
+        }
+        voiceListening = true
+        voiceTurnSerial++
+        val serial = voiceTurnSerial
+        speechRecognizer = recognizer
+        uiState = uiState.copy(
+            phase = EtaVoicePhase.READY,
+            status = EtaVoiceStatus.Listening,
+        )
+        recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onError(error: Int) {
+                scope.launch(Dispatchers.Main.immediate) {
+                    if (serial != voiceTurnSerial) return@launch
+                    handleVoiceError(error)
+                }
+            }
+            override fun onResults(results: Bundle?) {
+                scope.launch(Dispatchers.Main.immediate) {
+                    if (serial != voiceTurnSerial) return@launch
+                    handleVoiceResults(results)
+                }
+            }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+        }
+        recognizer.startListening(intent)
+    }
+
+    private fun stopVoiceListening() {
+        voiceListening = false
+        val recognizer = speechRecognizer
+        speechRecognizer = null
+        runCatching { recognizer?.cancel() }
+        runCatching { recognizer?.destroy() }
+        if (!voiceSessionMode) {
+            uiState = uiState.copy(status = EtaVoiceStatus.InputRequest)
+        }
+    }
+
+    private fun handleVoiceResults(results: Bundle?) {
+        voiceListening = false
+        val texts = results?.getStringArrayList(RecognizerIntent.EXTRA_RESULTS)
+        val text = texts?.firstOrNull()?.trim().orEmpty()
+        if (text.isBlank()) {
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+            if (voiceSessionMode) exitVoiceSession()
+            return
+        }
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+        inputText = text
+        submitPrompt(text)
+    }
+
+    private fun handleVoiceError(error: Int) {
+        voiceListening = false
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+        when (error) {
+            SpeechRecognizer.ERROR_NO_MATCH,
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                if (voiceSessionMode) {
+                    exitVoiceSession()
+                } else {
+                    uiState = uiState.copy(status = EtaVoiceStatus.InputRequest)
+                }
+            }
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
+                if (voiceSessionMode) scheduleNextVoiceTurn()
+            }
+            else -> {
+                if (voiceSessionMode) {
+                    exitVoiceSession()
+                } else {
+                    uiState = uiState.copy(
+                        phase = EtaVoicePhase.ERROR,
+                        status = EtaVoiceStatus.Failed("语音识别错误 #$error"),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun toggleVoiceListening() {
+        if (voiceListening) {
+            stopVoiceListening()
+        } else {
+            startVoiceListening()
+        }
+    }
+
+    private fun scheduleNextVoiceTurn() {
+        scope.launch {
+            delay(VOICE_TURN_GAP_MS)
+            withContext(Dispatchers.Main.immediate) {
+                if (voiceSessionMode && activeRunId == null && !voiceListening && windowView != null) {
+                    startVoiceListening()
+                }
+            }
+        }
+    }
+
+    private fun exitVoiceSession() {
+        voiceSessionMode = false
+        voiceListening = false
+        val recognizer = speechRecognizer
+        speechRecognizer = null
+        runCatching { recognizer?.cancel() }
+        runCatching { recognizer?.destroy() }
+        removeWindow()
+        stopSelf()
+        resumeHotwordListening()
+    }
+
     private fun updateSoftInput(visible: Boolean) {
         val wm = windowManager ?: return
         val view = windowView ?: return
@@ -869,9 +1046,23 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
         entryCaptureJob?.cancel()
         entryCaptureJob = null
         screenContextAttachment = null
+        voiceSessionMode = false
+        voiceListening = false
+        pendingInitialQuery = null
+        val recognizer = speechRecognizer
+        speechRecognizer = null
+        runCatching { recognizer?.cancel() }
+        runCatching { recognizer?.destroy() }
         cancelCurrentRun()
         removeWindow()
         stopSelf()
+        resumeHotwordListening()
+    }
+
+    /** 语音会话结束后恢复语音唤醒监听（麦克风交还唤醒服务）。 */
+    private fun resumeHotwordListening() {
+        if (!Prefs.isEnabled(Prefs.Keys.ETA_HOTWORD_ENABLED)) return
+        runCatching { EtaHotwordService.resumeHotword(this) }
     }
 
     private fun openConversation() {
@@ -940,11 +1131,14 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
     internal companion object {
         const val ACTION_SHOW = "io.github.mangi.eta.agent.voice.SHOW"
         const val ACTION_OPEN_CONVERSATION = "io.github.mangi.eta.agent.voice.OPEN_CONVERSATION"
+        const val EXTRA_VOICE_MODE = "io.github.mangi.eta.agent.voice.extra.VOICE_MODE"
+        const val EXTRA_INITIAL_QUERY = "io.github.mangi.eta.agent.voice.extra.SPOKEN_QUERY"
         const val EXTRA_CONVERSATION_KEY = "io.github.mangi.eta.agent.voice.extra.CONVERSATION_KEY"
         private const val ACTION_HANDOFF_READY = "io.github.mangi.eta.agent.voice.HANDOFF_READY"
         private const val HANDOFF_TIMEOUT_MS = 5_000L
         private const val HANDOFF_EXIT_DURATION_MS = 220L
         private const val HANDOFF_REQUEST_CODE = 0x455441
+        private const val VOICE_TURN_GAP_MS = 700L
         private const val LEGACY_STOPPED_ERROR = "已停止"
         private const val SYNTHETIC_STOPPED = "eta_status:stopped"
         private const val SYNTHETIC_RUNTIME_FAILED = "eta_status:runtime_failed"
@@ -995,11 +1189,14 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
             }
         }
 
-        fun show(context: Context) {
-            context.applicationContext.startService(
-                Intent(context.applicationContext, EtaAssistantOverlayService::class.java)
-                    .setAction(ACTION_SHOW),
-            )
+        fun show(context: Context, voiceMode: Boolean = false, initialQuery: String? = null) {
+            val intent = Intent(context.applicationContext, EtaAssistantOverlayService::class.java)
+                .setAction(ACTION_SHOW)
+                .putExtra(EXTRA_VOICE_MODE, voiceMode)
+            if (!initialQuery.isNullOrBlank()) {
+                intent.putExtra(EXTRA_INITIAL_QUERY, initialQuery)
+            }
+            context.applicationContext.startService(intent)
         }
 
         fun dismiss(context: Context) {

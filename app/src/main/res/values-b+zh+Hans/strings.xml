@@ -1164,4 +1164,9 @@
   <string name="data_backup_imported">已导入 %1$d 个对话和 %2$d 个模型提供商</string>
   <string name="data_backup_failed">备份操作失败</string>
   <string name="data_backup_file_open_failed">无法打开所选文件</string>
+  <string name="hotword_channel_name">语音唤醒</string>
+  <string name="hotword_notification_title">Eta 语音唤醒</string>
+  <string name="hotword_notification_text">正在监听“%1$s”</string>
+  <string name="settings_hotword_title">语音唤醒</string>
+  <string name="settings_hotword_summary">离线监听唤醒词（默认“小爱同学”），说出即可唤起 Eta 语音助手。</string>
 </resources>
