@@ -549,6 +549,7 @@ internal class AgentTraceFormatter {
             "top_memory_apps" to "查看内存占用排行",
             "top_storage_apps" to "查看存储占用排行",
             "media_control" to "控制媒体播放",
+            "tap_text" to "按文字点击",
             "play_music" to "播放音乐",
             "play_video" to "播放视频",
             "web_search" to "网页搜索",

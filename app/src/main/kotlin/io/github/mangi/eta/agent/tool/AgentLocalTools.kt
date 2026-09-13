@@ -176,6 +176,7 @@ internal class AgentLocalTools(
                 "browser_use" -> browserUse(args, toolCall.id)
                 "observe_screen" -> observeScreen(args)
                 "tap" -> textResult(tap(args))
+                "tap_text" -> textResult(tapText(args))
                 "tap_area" -> textResult(tapArea(args))
                 "tap_element" -> textResult(tapElement(args))
                 "long_press" -> textResult(longPress(args))
@@ -716,34 +717,91 @@ internal class AgentLocalTools(
     }
 
     /** 回放的语义点击：重新观察当前屏幕，按文本/描述匹配元素后点击，容忍界面小幅变化。 */
-    private fun flowTapText(stepArgs: JSONObject): String {
-        val target = stepArgs.optString("text").trim()
-        if (target.isEmpty()) return errorResult("INVALID_ARGUMENT", "tap_text 缺少 text")
+    private fun tapText(args: JSONObject): String {
+        val target = args.optString("text").trim()
+        if (target.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少 text")
+        val ordinal = args.optInt("ordinal", 1).coerceAtLeast(1)
         val observation = deviceController.observe(
             includeScreenshot = false,
             includeUiTree = true,
-            maxNodes = 120,
+            maxNodes = 200,
         )
         val elements = observation.elementObservation
             ?: return errorResult("NO_OBSERVATION", "无法获取当前屏幕节点；请确认无障碍服务已开启")
-        val node = elements.nodes.firstOrNull {
-            (it.text.contains(target) || it.desc.contains(target)) && it.clickable
-        } ?: elements.nodes.firstOrNull {
-            it.text.contains(target) || it.desc.contains(target)
-        } ?: return errorResult(
-            code = "ELEMENT_NOT_FOUND",
-            message = "当前屏幕未找到包含「$target」的元素；界面可能已变化，请改用 observe_screen + tap_element 手动继续",
-        )
+        val matches = findTextMatches(elements.nodes, target)
+        if (matches.isEmpty()) {
+            return errorResult(
+                code = "ELEMENT_NOT_FOUND",
+                message = "当前屏幕未找到包含「$target」的元素；可先 observe_screen 确认界面，或改用 tap_element",
+            )
+        }
+        val node = matches.getOrNull(ordinal - 1) ?: matches.first()
+        // 优先走节点点击；不可点击时找包含其中心的可点击祖先区域，最后才按中心坐标手势点击
+        val clickTarget = if (node.clickable) node
+        else elements.nodes.firstOrNull { candidate ->
+            candidate.clickable && candidate.bounds.contains(node.bounds.centerX(), node.bounds.centerY())
+        }
         publishedObservation.set(
             PublishedObservation(
                 elements = elements,
                 coordinateSpace = observation.coordinateSpace,
             ),
         )
-        return tapElement(
-            JSONObject().put("index", node.index).put("observation_id", elements.id),
-        )
+        if (clickTarget != null) {
+            val result = tapElement(
+                JSONObject().put("index", clickTarget.index).put("observation_id", elements.id),
+            )
+            if (result.isOkJson()) return result
+        }
+        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+        return deviceController.tap(node.bounds.centerX(), node.bounds.centerY())
+            .let { json ->
+                if (json.isOkJson()) json else errorResult(
+                    code = "TAP_TEXT_FAILED",
+                    message = "点击「$target」未成功；可先 observe_screen 后改用 tap_element",
+                )
+            }
     }
+
+    /** 归一化后按文字匹配节点：完全相等优先，其次包含；每级内可点击的排前面。 */
+    private fun findTextMatches(
+        nodes: List<RootShellDeviceController.UiNode>,
+        target: String,
+    ): List<RootShellDeviceController.UiNode> {
+        val needle = normalizeUiText(target)
+        if (needle.isEmpty()) return emptyList()
+        val scored = nodes.mapNotNull { node ->
+            val haystack = normalizeUiText(node.text.ifBlank { node.desc })
+            if (haystack.isEmpty()) return@mapNotNull null
+            val rank = when {
+                haystack == needle -> 0
+                haystack.contains(needle) -> 1
+                else -> return@mapNotNull null
+            }
+            node to rank
+        }
+        return scored
+            .sortedWith(compareBy({ it.second }, { !it.first.clickable }))
+            .map { it.first }
+    }
+
+    private fun normalizeUiText(text: String): String = text.trim()
+        .map { c ->
+            when {
+                c in '\uFF01'..'\uFF5E' -> (c.code - 0xFEE0).toChar()
+                c == '\u3000' -> ' '
+                else -> c
+            }
+        }
+        .joinToString("")
+        .replace("（", "(")
+        .replace("）", ")")
+        .replace("：", ":")
+        .replace("，", ",")
+        .lowercase()
+        .filterNot { it.isWhitespace() }
+
+    private fun flowTapText(stepArgs: JSONObject): String = tapText(stepArgs)
 
     private fun substituteParams(stepArgs: JSONObject, params: JSONObject): JSONObject {
         if (params.length() == 0) return stepArgs
@@ -790,6 +848,12 @@ internal class AgentLocalTools(
                         .put("coordinate_space", "screen"),
                 )
             }
+            "tap_text" -> AgentFlowStore.FlowStep(
+                "tap_text",
+                JSONObject()
+                    .put("text", args.optString("text"))
+                    .put("ordinal", args.optInt("ordinal", 1)),
+            )
             "tap_element" -> {
                 val observation = requireElementObservation(args) ?: return null
                 val node = observation.nodes.firstOrNull { it.index == args.optInt("index", -1) } ?: return null

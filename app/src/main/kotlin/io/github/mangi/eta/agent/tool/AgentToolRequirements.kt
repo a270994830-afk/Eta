@@ -36,6 +36,7 @@ internal object AgentToolRequirements {
             "order_food", "stock", "short_video", "navigate", "flashlight",
             "send_sms", "set_brightness",
             "flow_start_recording", "flow_stop_recording", "flows_list", "flow_run", "flow_update", "flow_delete",
+            "tap_text",
             "search_notification_history", "recent_app_activity", "app_usage_summary",
             "get_current_location", "get_device_environment", "memory_get", "memory_write",
             "character_memory_get", "character_memory_write",
@@ -60,7 +61,7 @@ internal object AgentToolRequirements {
             "search_qq_chat_images", "search_wechat_chat_images",
         )
         listOf(
-            "observe_screen", "tap", "tap_area", "tap_element", "long_press",
+            "observe_screen", "tap", "tap_text", "tap_area", "tap_element", "long_press",
             "long_press_element", "swipe", "scroll", "scroll_element", "input_text",
             "replace_text", "clear_text", "paste_text", "press_key", "open_system_panel",
             "wait_for_text", "wait_for_package",

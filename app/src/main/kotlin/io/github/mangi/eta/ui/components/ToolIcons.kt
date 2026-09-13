@@ -59,6 +59,7 @@ import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material.icons.rounded.WebAsset
@@ -68,6 +69,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "observe", "observe_screen" -> Icons.Rounded.DocumentScanner
     "click", "tap", "tap_element" -> Icons.Rounded.AdsClick
+    "tap_text" -> Icons.Rounded.TextFields
     "tap_area" -> Icons.Rounded.MyLocation
     "long_press", "long_press_element" -> Icons.Rounded.TouchApp
     "swipe" -> Icons.Rounded.OpenWith
