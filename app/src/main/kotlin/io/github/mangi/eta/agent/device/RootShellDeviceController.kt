@@ -225,11 +225,11 @@ internal class RootShellDeviceController(
         return Observation(json.toString(), image, elementObservation, coordinateSpace)
     }
 
-    fun tap(x: Int, y: Int): String {
+    fun tap(x: Int, y: Int, durationMs: Long = 50): String {
         if (AgentAccessibilityService.current() == null && !rootAvailable()) return accessibilityUnavailable()
         validatePoint(x, y)
         AgentAccessibilityService.current()?.let { service ->
-            val result = service.gestureTap(x.toFloat(), y.toFloat())
+            val result = service.gestureTap(x.toFloat(), y.toFloat(), durationMs)
             if (result.ok) {
                 waitForUiSettle("tap")
                 return nodeActionJson("tap", result)

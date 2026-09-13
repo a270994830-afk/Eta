@@ -736,10 +736,21 @@ internal class AgentLocalTools(
             )
         }
         val node = matches.getOrNull(ordinal - 1) ?: matches.first()
-        // 优先走节点点击；不可点击时找包含其中心的可点击祖先区域，最后才按中心坐标手势点击
-        val clickTarget = if (node.clickable) node
-        else elements.nodes.firstOrNull { candidate ->
-            candidate.clickable && candidate.bounds.contains(node.bounds.centerX(), node.bounds.centerY())
+        // 点击目标选择：文字节点自身 → 包含其中心的最小可点击祖先 → 同行可点击兄弟（如单选圆钮）→ 中心坐标手势
+        val textCenterX = node.bounds.centerX()
+        val textCenterY = node.bounds.centerY()
+        val clickTarget = if (node.clickable) {
+            node
+        } else {
+            val ancestors = elements.nodes.filter { it.clickable && it.bounds.contains(textCenterX, textCenterY) }
+            ancestors.minByOrNull { it.bounds.width().toLong() * it.bounds.height() }
+                ?: elements.nodes
+                    .filter { candidate ->
+                        candidate.clickable && candidate.bounds != node.bounds &&
+                            candidate.bounds.top < node.bounds.bottom &&
+                            candidate.bounds.bottom > node.bounds.top
+                    }
+                    .minByOrNull { kotlin.math.abs(it.bounds.centerX() - textCenterX) }
         }
         publishedObservation.set(
             PublishedObservation(
@@ -747,20 +758,14 @@ internal class AgentLocalTools(
                 coordinateSpace = observation.coordinateSpace,
             ),
         )
-        if (clickTarget != null) {
-            val result = tapElement(
-                JSONObject().put("index", clickTarget.index).put("observation_id", elements.id),
-            )
-            if (result.isOkJson()) return result
-        }
         AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
-        return deviceController.tap(node.bounds.centerX(), node.bounds.centerY())
-            .let { json ->
-                if (json.isOkJson()) json else errorResult(
-                    code = "TAP_TEXT_FAILED",
-                    message = "点击「$target」未成功；可先 observe_screen 后改用 tap_element",
-                )
-            }
+        val tapPoint = clickTarget ?: node
+        val result = deviceController.tap(tapPoint.bounds.centerX(), tapPoint.bounds.centerY(), durationMs = 120)
+        if (result.isOkJson()) return result
+        return errorResult(
+            code = "TAP_TEXT_FAILED",
+            message = "点击「$target」未成功；可先 observe_screen 后改用 tap_element",
+        )
     }
 
     /** 归一化后按文字匹配节点：完全相等优先，其次包含；每级内可点击的排前面。 */
