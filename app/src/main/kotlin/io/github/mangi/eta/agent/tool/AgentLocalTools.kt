@@ -1336,6 +1336,8 @@ internal class AgentLocalTools(
             "order_food",
             "stock",
             "short_video",
+            "navigate",
+            "flashlight",
         )
         val DEVICE_SENSITIVE_READ_TOOL_NAMES = setOf(
             "get_setting",
@@ -1374,6 +1376,8 @@ internal class AgentLocalTools(
             "set_setting",
             "set_device_state",
             "app_state_control",
+            "send_sms",
+            "set_brightness",
         )
         val DEVICE_TOOL_NAMES =
             DEVICE_DIRECT_TOOL_NAMES + DEVICE_SENSITIVE_READ_TOOL_NAMES +

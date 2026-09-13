@@ -136,6 +136,25 @@ internal object AgentDeviceToolCatalog {
             )
             .put(
                 function(
+                    "navigate",
+                    "导航到目的地：交给系统地图应用开始路线规划。要去某地时优先使用本工具。",
+                    properties(
+                        "destination" to string("目的地地址或地点名", 200),
+                    ),
+                    "destination",
+                ),
+            )
+            .put(
+                function(
+                    "flashlight",
+                    "控制手电筒开关。",
+                    properties(
+                        "action" to enumString("动作，默认 toggle", "on", "off", "toggle"),
+                    ),
+                ),
+            )
+            .put(
+                function(
                     "set_volume",
                     "直接设置系统音量，不要操作音量 GUI。",
                     properties(
@@ -143,6 +162,27 @@ internal object AgentDeviceToolCatalog {
                         "percent" to integer("0 到 100 的音量百分比", 0, 100),
                     ),
                     "stream", "percent",
+                ),
+            )
+            .put(
+                function(
+                    "send_sms",
+                    "给指定手机号发送短信。结果可能产生实际费用与外发行为，仅在用户明确要求时使用。",
+                    properties(
+                        "to" to string("收件人手机号", 20),
+                        "body" to string("短信内容", 500),
+                    ),
+                    "to", "body",
+                ),
+            )
+            .put(
+                function(
+                    "set_brightness",
+                    "设置屏幕亮度（0-100）。需要“修改系统设置”权限。",
+                    properties(
+                        "level" to integer("0 到 100 的亮度百分比", 0, 100),
+                    ),
+                    "level",
                 ),
             )
     }

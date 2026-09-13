@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.AdsClick
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.Brightness6
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Computer
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.FindReplace
+import androidx.compose.material.icons.rounded.FlashlightOn
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Insights
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.OndemandVideo
 import androidx.compose.material.icons.rounded.OpenWith
@@ -51,6 +54,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.TouchApp
@@ -105,6 +109,10 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "open_device_action" -> Icons.AutoMirrored.Rounded.OpenInNew
     "order_food" -> Icons.Rounded.Restaurant
     "stock" -> Icons.AutoMirrored.Rounded.TrendingUp
+    "navigate" -> Icons.Rounded.Navigation
+    "flashlight" -> Icons.Rounded.FlashlightOn
+    "send_sms" -> Icons.Rounded.Sms
+    "set_brightness" -> Icons.Rounded.Brightness6
     "set_volume" -> Icons.AutoMirrored.Rounded.VolumeUp
     "top_memory_apps", "top_storage_apps" -> Icons.Rounded.Layers
     "read_sms_code" -> Icons.Rounded.Key

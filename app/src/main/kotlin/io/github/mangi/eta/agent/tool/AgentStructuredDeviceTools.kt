@@ -45,6 +45,9 @@ internal class AgentStructuredDeviceTools(
     private val privateDatabaseTools = AgentPrivateDatabaseTools(context, root)
     private val notificationHistory by lazy { NotificationHistoryRepository(context) }
 
+    @Volatile
+    private var torchOn = false
+
     fun execute(name: String, args: JSONObject): AgentModelClient.ToolResult? =
         personalDataTools.execute(name, args)
             ?: personalContextTools.execute(name, args)
@@ -67,6 +70,8 @@ internal class AgentStructuredDeviceTools(
             "order_food" -> text(orderFood(args))
             "stock" -> text(stockQuote(args))
             "short_video" -> text(shortVideo(args))
+            "navigate" -> text(navigate(args))
+            "flashlight" -> text(flashlight(args))
             "set_volume" -> text(setVolume(args))
             "get_setting" -> sensitive(getSetting(args))
             "wifi_credentials" -> sensitive(wifiCredentials(args))
@@ -76,6 +81,8 @@ internal class AgentStructuredDeviceTools(
             "set_setting" -> text(setSetting(args))
             "set_device_state" -> text(setDeviceState(args))
             "app_state_control" -> text(appStateControl(args))
+            "send_sms" -> text(sendSms(args))
+            "set_brightness" -> text(setBrightness(args))
             else -> null
         }
 
@@ -496,6 +503,93 @@ internal class AgentStructuredDeviceTools(
         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching { context.startActivity(fallback) }
             .getOrNull()?.let { ok(tool).put("keyword", keyword).put("via", "browser").toString() }
+    }
+
+    /** 导航：geo URI 交给系统地图应用，未装地图时回退浏览器。 */
+    private fun navigate(args: JSONObject): String {
+        val destination = args.optString("destination").trim()
+        if (destination.isBlank()) return error("INVALID_ARGUMENT", "缺少目的地")
+        val geo = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(destination)))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(geo) }.onSuccess {
+            return ok("navigate").put("destination", destination).put("via", "geo").toString()
+        }
+        return browserFallback("navigate", "$destination 路线 导航")
+            ?: error("NO_MAP_APP", "没有可用的地图应用或浏览器")
+    }
+
+    /** 手电筒开关；torch 模式 API 23+ 无需额外权限。 */
+    private fun flashlight(args: JSONObject): String {
+        val action = args.optString("action").trim().lowercase(Locale.ROOT).ifEmpty { "toggle" }
+        return try {
+            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+            val cameraId = cameraManager.cameraIdList.firstOrNull()
+                ?: return error("NO_CAMERA", "设备上没有可用的摄像头")
+            val target = when (action) {
+                "on" -> true
+                "off" -> false
+                "toggle" -> !torchOn
+                else -> return error("INVALID_ARGUMENT", "不支持的动作: $action")
+            }
+            cameraManager.setTorchMode(cameraId, target)
+            torchOn = target
+            ok("flashlight").put("on", target).toString()
+        } catch (e: Exception) {
+            error("FLASHLIGHT_FAILED", "手电筒操作失败: ${e.message}")
+        }
+    }
+
+    /** 发送短信；需要 SEND_SMS 运行时权限。 */
+    @Suppress("DEPRECATION")
+    private fun sendSms(args: JSONObject): String {
+        val to = args.optString("to").trim()
+        val body = args.optString("body")
+        if (to.isBlank() || body.isBlank()) return error("INVALID_ARGUMENT", "缺少收件人或内容")
+        if (context.checkSelfPermission(android.Manifest.permission.SEND_SMS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            return error("PERMISSION_REQUIRED", "请在系统设置中授予 Eta 短信权限后重试")
+        }
+        return try {
+            val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                context.getSystemService(android.telephony.SmsManager::class.java)
+            } else {
+                @Suppress("DEPRECATION") android.telephony.SmsManager.getDefault()
+            }
+            val parts = smsManager.divideMessage(body)
+            if (parts.size == 1) {
+                smsManager.sendTextMessage(to, null, body, null, null)
+            } else {
+                smsManager.sendMultipartTextMessage(to, null, parts, null, null)
+            }
+            ok("send_sms").put("to", to).toString()
+        } catch (e: Exception) {
+            error("SMS_SEND_FAILED", "短信发送失败: ${e.message}")
+        }
+    }
+
+    /** 设置屏幕亮度；需要“修改系统设置”特殊权限。 */
+    private fun setBrightness(args: JSONObject): String {
+        val level = args.optInt("level", -1)
+        if (level !in 0..100) return error("INVALID_ARGUMENT", "level 必须在 0 到 100 之间")
+        if (!android.provider.Settings.System.canWrite(context)) {
+            return error("PERMISSION_REQUIRED", "请在系统设置中允许 Eta 修改系统设置后重试")
+        }
+        return try {
+            android.provider.Settings.System.putInt(
+                context.contentResolver,
+                android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,
+                android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL,
+            )
+            android.provider.Settings.System.putInt(
+                context.contentResolver,
+                android.provider.Settings.System.SCREEN_BRIGHTNESS,
+                (level * 255 / 100).coerceIn(0, 255),
+            )
+            ok("set_brightness").put("level", level).toString()
+        } catch (e: Exception) {
+            error("BRIGHTNESS_FAILED", "亮度设置失败: ${e.message}")
+        }
     }
 
     /** 快速网页搜索：交给系统搜索能力，直接展示搜索结果。 */
