@@ -291,11 +291,18 @@ internal class AgentStructuredDeviceTools(
         return ok("media_control").put("action", args.getString("action")).toString()
     }
 
-    /** 按歌名/歌手搜索并播放：优先交给默认音乐应用，一步到位。 */
+    /** 按歌名/歌手搜索并播放：优先本地曲库精确匹配，再交给默认音乐应用。 */
     private fun playMusic(args: JSONObject): String {
         val query = args.optString("query").trim()
         if (query.isBlank()) return error("INVALID_ARGUMENT", "缺少歌曲或歌手名称")
-        // 1) 系统媒体搜索播放（由系统路由给默认音乐应用）
+        // 1) 本地曲库精确匹配：查 MediaStore 后直接让默认播放器播放那一首。
+        //    大部分第三方播放器（如 APlayer）不实现 MEDIA_PLAY_FROM_SEARCH，
+        //    只会打开主界面，所以必须自己定位到具体曲目再交给它。
+        playLocalTrack(query)?.let { track ->
+            return ok("play_music").put("query", query)
+                .put("via", "local_track").put("title", track).toString()
+        }
+        // 2) 系统媒体搜索播放（在线音乐场景，由系统路由给默认音乐应用）
         //    注意：不能用 resolveActivity 预检，Android 11+ 包可见性会让它误报为“无可用应用”。
         val playIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -322,6 +329,47 @@ internal class AgentStructuredDeviceTools(
             onSuccess = { ok("play_music").put("query", query).put("via", "browser").toString() },
             onFailure = { error("NO_MUSIC_APP", "没有可用的音乐应用或浏览器") },
         )
+    }
+
+    /**
+     * 在本地曲库中按歌名/歌手/专辑匹配一首歌，返回可交给播放器的 URI；
+     * 未命中或无曲库权限时返回 null。匹配优先级：歌名 > 歌手 > 专辑。
+     */
+    private fun playLocalTrack(query: String): String? {
+        val cleaned = query.trim()
+        if (cleaned.isEmpty()) return null
+        val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        val like = "%$cleaned%"
+        val matchers = listOf(
+            "${MediaStore.Audio.Media.TITLE} LIKE ?",
+            "${MediaStore.Audio.Media.ARTIST} LIKE ?",
+            "${MediaStore.Audio.Media.ALBUM} LIKE ?",
+        )
+        val selection = matchers.joinToString(" OR ")
+        val selectionArgs = arrayOf(like, like, like)
+        val trackUri = runCatching {
+            context.contentResolver.query(
+                collection,
+                arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE),
+                selection,
+                selectionArgs,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(0)
+                    val title = cursor.getString(1) ?: ""
+                    Uri.withAppendedPath(collection, id.toString()) to title
+                } else null
+            }
+        }.getOrNull()
+        val (uri, title) = trackUri ?: return null
+        val play = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "audio/*")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return runCatching { context.startActivity(play) }
+            .onFailure { logger.info("play_music 本地曲目启动失败: ${it.message}") }
+            .getOrNull()?.let { title }
     }
 
     /** 快速网页搜索：交给系统搜索能力，直接展示搜索结果。 */
