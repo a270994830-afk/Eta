@@ -28,27 +28,6 @@ internal object AgentModelClient {
     }
     private val traceFormatter = AgentTraceFormatter()
 
-    /**
-     * 判断提供商是否指向本机/内网推理服务。本地模型 prompt 预算小，
-     * 运行时跳过技能索引与技能工具注入，避免请求超出上下文或变得很慢。
-     */
-    private fun isLocalEndpoint(baseUrl: String): Boolean {
-        val value = baseUrl.lowercase()
-        return value.contains("127.0.0.1") ||
-            value.contains("localhost") ||
-            value.contains("0.0.0.0") ||
-            value.contains("[::1]") ||
-            value.contains("://10.") ||
-            value.contains("://192.168.") ||
-            value.contains("://172.16.") ||
-            value.contains("://172.17.") ||
-            value.contains("://172.18.") ||
-            value.contains("://172.19.") ||
-            value.contains("://172.2") ||
-            value.contains("://172.30.") ||
-            value.contains("://172.31.")
-    }
-
     fun loadConfig(): ModelConfig {
         val runtimeJson = Prefs.getString(Prefs.Keys.AGENT_RUNTIME_CONFIG_JSON)
         if (runtimeJson.isNotBlank()) {
@@ -127,7 +106,6 @@ internal object AgentModelClient {
     ): ModelResponse.Text {
         config.validate()
         val initialCapabilities = capabilitiesProvider()
-        val includeSkills = !isLocalEndpoint(config.baseUrl)
         val messages = AgentPromptBuilder.buildInitialMessages(
             config,
             prompt,
@@ -137,7 +115,6 @@ internal object AgentModelClient {
             memoryContext,
             rootAvailable = initialCapabilities.rootAvailable,
             roleplayContext = roleplayContext,
-            includeSkills = includeSkills,
         )
         if (rewriteReply) {
             messages.put(messages.length() - 1, AgentConversationCodec.userTextMessage(
@@ -153,7 +130,6 @@ internal object AgentModelClient {
         // 旧 history 中的无效消息可能在组装时被跳过，系统边界不能由 history 条数倒推。
         val systemCount = AgentPromptBuilder.buildSystemMessages(
             config, skillContext, memoryContext, initialCapabilities.rootAvailable, roleplayContext,
-            includeSkills = includeSkills,
         ).length()
         fun toolsFor(capabilities: AgentToolCapabilities): JSONArray {
             if (rewriteReply) return JSONArray()
@@ -167,7 +143,6 @@ internal object AgentModelClient {
                 skillGitHubInstall = true,
                 memoryTools = memoryContext.enabled,
                 memoryWritable = roleplayContext == null,
-                skillTools = includeSkills,
                 capabilities = capabilities,
             )
             for (index in 0 until additionalTools.length()) {
@@ -208,7 +183,6 @@ internal object AgentModelClient {
                 if (capabilities.rootAvailable != promptRootAvailable) {
                     val systemMessages = AgentPromptBuilder.buildSystemMessages(
                         config, skillContext, memoryContext, capabilities.rootAvailable, roleplayContext,
-                        includeSkills = includeSkills,
                     )
                     for (index in 0 until systemMessages.length()) {
                         messages.put(index, systemMessages.getJSONObject(index))
