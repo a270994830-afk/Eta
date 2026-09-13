@@ -450,12 +450,17 @@ internal class AgentStructuredDeviceTools(
         val candidates = when (app) {
             "meituan" -> listOf("com.sankuai.meituan.takeoutnew", "com.sankuai.meituan")
             "eleme" -> listOf("me.ele")
-            else -> listOf("com.sankuai.meituan.takeoutnew", "com.sankuai.meituan", "me.ele")
+            "jd" -> listOf("com.jd.waimai", "com.jingdong.app.mall")
+            else -> listOf("com.sankuai.meituan.takeoutnew", "com.sankuai.meituan", "me.ele", "com.jd.waimai")
         }
         launchFirstInstalled(candidates)?.let { pkg ->
             return ok("order_food").put("app", pkg).put("via", "app_launch").toString()
         }
-        val keyword = if (app == "eleme") "饿了么" else "美团外卖"
+        val keyword = when (app) {
+            "eleme" -> "饿了么"
+            "jd" -> "京东外卖"
+            else -> "美团外卖"
+        }
         return browserFallback("order_food", "$keyword 外卖")
             ?: error("NO_FOOD_APP", "没有安装外卖应用，也没有可用的浏览器")
     }

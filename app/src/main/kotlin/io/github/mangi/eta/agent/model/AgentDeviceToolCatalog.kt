@@ -109,9 +109,9 @@ internal object AgentDeviceToolCatalog {
             .put(
                 function(
                     "order_food",
-                    "点外卖：直接拉起已安装的外卖应用（美团外卖/饿了么），选餐下单在应用内完成。",
+                    "点外卖：直接拉起已安装的外卖应用（美团外卖/饿了么/京东外卖），选餐下单在应用内完成。",
                     properties(
-                        "app" to enumString("外卖平台，默认自动选择已装的", "any", "meituan", "eleme"),
+                        "app" to enumString("外卖平台，默认自动选择已装的", "any", "meituan", "eleme", "jd"),
                     ),
                 ),
             )
