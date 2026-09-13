@@ -564,6 +564,7 @@ internal class AgentTraceFormatter {
             "flow_stop_recording" to "结束录制流程",
             "flows_list" to "查看已存流程",
             "flow_run" to "回放流程",
+            "flow_update" to "修正流程",
             "flow_delete" to "删除流程",
             "set_volume" to "调整音量",
             "get_setting" to "读取系统设置",

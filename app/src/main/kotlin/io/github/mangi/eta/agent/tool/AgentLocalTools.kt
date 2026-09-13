@@ -198,6 +198,7 @@ internal class AgentLocalTools(
                 "flow_stop_recording" -> textResult(flowStopRecording(args))
                 "flows_list" -> textResult(flowsList())
                 "flow_run" -> textResult(flowRun(args))
+                "flow_update" -> textResult(flowUpdate(args))
                 "flow_delete" -> textResult(flowDelete(args))
                 in DEVICE_TOOL_NAMES ->
                     structuredDeviceTools.execute(toolCall.name, args)
@@ -660,6 +661,41 @@ internal class AgentLocalTools(
             .put("flow", flow.name)
             .put("steps", flow.steps.size)
             .put("message", "流程回放完成")
+            .toString()
+    }
+
+    private fun flowUpdate(args: JSONObject): String {
+        val name = args.optString("name").trim()
+        if (name.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少流程名")
+        val stepsJson = args.optJSONArray("steps")
+        if (stepsJson == null || stepsJson.length() == 0) {
+            return errorResult("INVALID_ARGUMENT", "缺少 steps 数组")
+        }
+        val newSteps = (0 until stepsJson.length()).mapNotNull { i ->
+            val obj = stepsJson.optJSONObject(i) ?: return@mapNotNull null
+            val action = obj.optString("action").trim()
+            if (action.isEmpty()) return@mapNotNull null
+            AgentFlowStore.FlowStep(action, obj.optJSONObject("args") ?: JSONObject())
+        }.filter { step ->
+            step.action in setOf(
+                "launch_app", "open_uri", "tap_text", "tap_xy", "input_text", "replace_text",
+                "clear_text", "swipe", "scroll", "press_key", "wait_text", "wait_package",
+            )
+        }
+        if (newSteps.isEmpty()) {
+            return errorResult("INVALID_ARGUMENT", "steps 中没有有效的步骤")
+        }
+        val updated = AgentFlowStore.updateFlow(
+            AgentFlowStore.storeFile(context),
+            name,
+            args.optInt("replace_from", 0),
+            newSteps,
+        ) ?: return errorResult("FLOW_NOT_FOUND", "未找到流程：$name")
+        return JSONObject()
+            .put("ok", true)
+            .put("flow", updated.name)
+            .put("steps", updated.steps.size)
+            .put("message", "流程已更新，下次回放将使用修正后的步骤")
             .toString()
     }
 

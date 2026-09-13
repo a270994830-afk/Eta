@@ -114,6 +114,21 @@ internal object AgentFlowStore {
         writeStore(storeFile, updated)
     }
 
+    /** 从 replaceFrom（0 起）开始用新步骤替换流程尾部，用于回放失败后的复盘修正。 */
+    @Synchronized
+    fun updateFlow(storeFile: File, name: String, replaceFrom: Int, newSteps: List<FlowStep>): AgentFlow? {
+        val store = readStore(storeFile)
+        val index = store.flows.indexOfFirst { it.name.equals(name.trim(), ignoreCase = true) }
+        if (index < 0) return null
+        val flow = store.flows[index]
+        if (newSteps.isEmpty()) return null
+        val from = replaceFrom.coerceIn(0, flow.steps.size)
+        val updatedSteps = flow.steps.take(from) + newSteps.take(MAX_STEPS)
+        val updated = flow.copy(steps = updatedSteps)
+        writeStore(storeFile, store.flows.toMutableList().also { it[index] = updated })
+        return updated
+    }
+
     @Synchronized
     private fun saveFlow(storeFile: File, flow: AgentFlow) {
         val existing = readStore(storeFile).flows.filterNot { it.name == flow.name }

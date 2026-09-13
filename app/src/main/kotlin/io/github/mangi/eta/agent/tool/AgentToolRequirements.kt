@@ -35,7 +35,7 @@ internal object AgentToolRequirements {
             "play_music", "play_video", "web_search", "open_device_action",
             "order_food", "stock", "short_video", "navigate", "flashlight",
             "send_sms", "set_brightness",
-            "flow_start_recording", "flow_stop_recording", "flows_list", "flow_run", "flow_delete",
+            "flow_start_recording", "flow_stop_recording", "flows_list", "flow_run", "flow_update", "flow_delete",
             "search_notification_history", "recent_app_activity", "app_usage_summary",
             "get_current_location", "get_device_environment", "memory_get", "memory_write",
             "character_memory_get", "character_memory_write",

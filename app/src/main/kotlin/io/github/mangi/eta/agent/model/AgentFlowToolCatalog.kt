@@ -63,6 +63,28 @@ internal object AgentFlowToolCatalog {
             )
             .put(
                 AgentToolSchema.function(
+                    name = "flow_update",
+                    description = "用新的步骤序列整体替换一个流程（通常在 flow_run 失败、手动完成剩余部分后使用：把这次手动成功执行的步骤传进来，替换原流程中从失败点开始的步骤）。replace_from 为 0 表示全部替换。",
+                    parameters = JSONObject()
+                        .put("type", "object")
+                        .put(
+                            "properties",
+                            JSONObject()
+                                .put("name", JSONObject().put("type", "string").put("description", "要更新的流程名。"))
+                                .put("replace_from", JSONObject().put("type", "integer").put("description", "从第几步（0 起）开始替换，默认 0。"))
+                                .put(
+                                    "steps",
+                                    JSONObject()
+                                        .put("type", "array")
+                                        .put("description", "新的步骤数组，每项为 {\"action\":\"tap_text\",\"args\":{\"text\":\"按钮文字\"}} 形式；支持 action：launch_app/open_uri/tap_text/tap_xy/input_text/replace_text/clear_text/swipe/scroll/press_key/wait_text/wait_package。")
+                                        .put("items", JSONObject().put("type", "object"))
+                                )
+                        )
+                        .put("required", JSONArray().put("name").put("steps"))
+                )
+            )
+            .put(
+                AgentToolSchema.function(
                     name = "flow_delete",
                     description = "删除一个已保存的流程。",
                     parameters = JSONObject()

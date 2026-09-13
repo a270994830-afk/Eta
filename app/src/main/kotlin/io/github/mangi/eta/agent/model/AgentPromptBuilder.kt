@@ -94,7 +94,11 @@ internal object AgentPromptBuilder {
                     "以及任务结束前确实需要确认最终结果时，才观察屏幕；仅当后续操作依赖特定文本或应用出现时使用 wait_for_text/wait_for_package。" +
                     "屏幕观察与 GUI 操作前会确认 Eta 无障碍服务；只有系统保护后端可用时才会请求有限重绑。" +
                     "若工具返回 ACCESSIBILITY_UNAVAILABLE、ACCESSIBILITY_PROTECTION_UNAVAILABLE 或 ACCESSIBILITY_REPAIR_TIMEOUT，说明动作未执行，" +
-                    "不要改用坐标或 Shell 重放 GUI 动作。"
+                    "不要改用坐标或 Shell 重放 GUI 动作。" +
+                    "处理重复性多步 GUI 任务时优先用语义流程：开始前用 flows_list 查是否有匹配流程，有则直接 flow_run；" +
+                    "没有且预计步骤超过 3 步时，先 flow_start_recording 再操作，成功后 flow_stop_recording 保存，" +
+                    "并在回复中告诉用户已保存为流程、下次可一键回放；任务失败或被放弃则 flow_stop_recording(save=false) 丢弃。" +
+                    "flow_run 失败时改用手动 GUI 方式完成剩余部分，完成后可用 flow_update 把修正后的剩余步骤写回流程，下次回放即可修复。"
             )
         )
         if (config.terminalTools) {
