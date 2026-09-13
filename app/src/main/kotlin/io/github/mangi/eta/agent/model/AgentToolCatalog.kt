@@ -15,6 +15,7 @@ internal object AgentToolCatalog {
         skillGitHubInstall: Boolean = false,
         memoryTools: Boolean = false,
         memoryWritable: Boolean = true,
+        skillTools: Boolean = true,
         capabilities: AgentToolCapabilities = AgentToolCapabilities(rootAvailable = true),
     ): JSONArray =
         capabilities.project(JSONArray().also { tools ->
@@ -28,11 +29,13 @@ internal object AgentToolCatalog {
                 sensitiveActionTools = deviceSensitiveActionTools,
             )
             if (browserTools) AgentBrowserToolCatalog.appendTo(tools)
-            AgentSkillToolCatalog.appendTo(
-                tools,
-                githubDiscovery = skillGitHubDiscovery,
-                githubInstall = skillGitHubInstall,
-            )
+            if (skillTools) {
+                AgentSkillToolCatalog.appendTo(
+                    tools,
+                    githubDiscovery = skillGitHubDiscovery,
+                    githubInstall = skillGitHubInstall,
+                )
+            }
             if (memoryTools) AgentMemoryToolCatalog.appendTo(tools, writable = memoryWritable)
             if (terminalTools) {
                 AgentFileVisionToolCatalog.appendTo(tools)
