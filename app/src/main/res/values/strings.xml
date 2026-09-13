@@ -1185,5 +1185,5 @@
   <string name="hotword_notification_title">Eta voice wake-up</string>
   <string name="hotword_notification_text">Listening for “%1$s”</string>
   <string name="settings_hotword_title">Voice wake-up</string>
-  <string name="settings_hotword_summary">Listen offline for the wake word (default “小爱同学”) and open the Eta voice assistant when it is spoken.</string>
+  <string name="settings_hotword_summary">Enable only for on-device wake word (keeps the microphone on; uses more battery). Not needed when using the system “小爱同学” or the power button.</string>
 </resources>

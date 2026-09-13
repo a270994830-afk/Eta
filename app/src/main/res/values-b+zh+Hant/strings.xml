@@ -1156,5 +1156,5 @@
   <string name="hotword_notification_title">Eta 語音喚醒</string>
   <string name="hotword_notification_text">正在監聽“%1$s”</string>
   <string name="settings_hotword_title">語音喚醒</string>
-  <string name="settings_hotword_summary">離線監聽喚醒詞（預設「小愛同學」），說出即可喚起 Eta 語音助理。</string>
+  <string name="settings_hotword_summary">僅在本機離線喚醒詞時開啟（會常駐麥克風、略增耗電）；使用系統「小愛同學」或電源鍵喚醒時無需開啟。</string>
 </resources>
