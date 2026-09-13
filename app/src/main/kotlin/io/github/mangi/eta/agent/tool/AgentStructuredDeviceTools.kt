@@ -300,6 +300,8 @@ internal class AgentStructuredDeviceTools(
         val playIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(SearchManager.QUERY, query)
+            // 明确搜索类型为单曲，部分播放器依赖该参数才能直接播放
+            putExtra(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Media.ENTRY_CONTENT_TYPE)
         }
         runCatching { context.startActivity(playIntent) }.onSuccess {
             return ok("play_music").put("query", query).put("via", "system_media_search").toString()
