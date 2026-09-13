@@ -127,7 +127,8 @@ internal object AgentModelClient {
     ): ModelResponse.Text {
         config.validate()
         val initialCapabilities = capabilitiesProvider()
-        val includeSkills = !isLocalEndpoint(config.baseUrl)
+        val localModel = isLocalEndpoint(config.baseUrl)
+        val includeSkills = !localModel
         val messages = AgentPromptBuilder.buildInitialMessages(
             config,
             prompt,
@@ -138,6 +139,7 @@ internal object AgentModelClient {
             rootAvailable = initialCapabilities.rootAvailable,
             roleplayContext = roleplayContext,
             includeSkills = includeSkills,
+            includeMemory = !localModel,
         )
         if (rewriteReply) {
             messages.put(messages.length() - 1, AgentConversationCodec.userTextMessage(
@@ -154,6 +156,7 @@ internal object AgentModelClient {
         val systemCount = AgentPromptBuilder.buildSystemMessages(
             config, skillContext, memoryContext, initialCapabilities.rootAvailable, roleplayContext,
             includeSkills = includeSkills,
+            includeMemory = !localModel,
         ).length()
         fun toolsFor(capabilities: AgentToolCapabilities): JSONArray {
             if (rewriteReply) return JSONArray()
@@ -168,6 +171,7 @@ internal object AgentModelClient {
                 memoryTools = memoryContext.enabled,
                 memoryWritable = roleplayContext == null,
                 skillTools = includeSkills,
+                toolsEnabled = !localModel,
                 capabilities = capabilities,
             )
             for (index in 0 until additionalTools.length()) {
@@ -209,6 +213,7 @@ internal object AgentModelClient {
                     val systemMessages = AgentPromptBuilder.buildSystemMessages(
                         config, skillContext, memoryContext, capabilities.rootAvailable, roleplayContext,
                         includeSkills = includeSkills,
+                        includeMemory = !localModel,
                     )
                     for (index in 0 until systemMessages.length()) {
                         messages.put(index, systemMessages.getJSONObject(index))

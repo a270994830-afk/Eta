@@ -16,9 +16,13 @@ internal object AgentToolCatalog {
         memoryTools: Boolean = false,
         memoryWritable: Boolean = true,
         skillTools: Boolean = true,
+        toolsEnabled: Boolean = true,
         capabilities: AgentToolCapabilities = AgentToolCapabilities(rootAvailable = true),
-    ): JSONArray =
-        capabilities.project(JSONArray().also { tools ->
+    ): JSONArray {
+        // 本地小模型（本机/内网推理服务）的 prompt 预算很小：直接不声明任何工具，
+        // 避免工具 schema 占满上下文导致请求超限或处理极慢。
+        if (!toolsEnabled) return JSONArray()
+        return capabilities.project(JSONArray().also { tools ->
             AgentContextAppToolCatalog.appendTo(tools)
             AgentGestureToolCatalog.appendTo(tools)
             AgentTextSystemToolCatalog.appendTo(tools)
@@ -42,4 +46,5 @@ internal object AgentToolCatalog {
                 AgentTerminalToolCatalog.appendTo(tools)
             }
         })
+    }
 }

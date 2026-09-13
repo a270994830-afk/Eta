@@ -18,9 +18,11 @@ internal object AgentPromptBuilder {
         rootAvailable: Boolean = false,
         roleplayContext: RoleplayRunContext? = null,
         includeSkills: Boolean = true,
+        includeMemory: Boolean = true,
     ): JSONArray {
         val messages = buildSystemMessages(
-            config, skillContext, memoryContext, rootAvailable, roleplayContext, includeSkills,
+            config, skillContext, memoryContext, rootAvailable, roleplayContext,
+            includeSkills, includeMemory,
         )
         history.forEach { item ->
             runCatching { AgentConversationCodec.toJsonObject(item) }.getOrNull()?.let(messages::put)
@@ -36,6 +38,7 @@ internal object AgentPromptBuilder {
         rootAvailable: Boolean,
         roleplayContext: RoleplayRunContext? = null,
         includeSkills: Boolean = true,
+        includeMemory: Boolean = true,
     ): JSONArray {
         val messages = JSONArray()
         if (roleplayContext == null && config.systemPrompt.isNotBlank()) {
@@ -144,7 +147,7 @@ internal object AgentPromptBuilder {
             )
         }
         roleplayContext?.personaMessage()?.let(messages::put)
-        buildMemorySystemMessage(memoryContext, writable = roleplayContext == null)?.let(messages::put)
+        if (includeMemory) buildMemorySystemMessage(memoryContext, writable = roleplayContext == null)?.let(messages::put)
         if (includeSkills) buildSkillSystemMessage(skillContext)?.let(messages::put)
         return messages
     }
