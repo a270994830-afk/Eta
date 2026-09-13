@@ -65,6 +65,39 @@ internal object AgentDeviceToolCatalog {
             )
             .put(
                 function(
+                    "play_music",
+                    "按歌曲名或歌手搜索并播放。要播放指定音乐时优先使用本工具，不要用 GUI 点击播放器。",
+                    properties(
+                        "query" to string("歌曲名或歌手名", 100),
+                    ),
+                    "query",
+                ),
+            )
+            .put(
+                function(
+                    "web_search",
+                    "快速网页搜索：把关键词交给系统搜索并展示结果。需要给用户看搜索结果时优先使用本工具。",
+                    properties(
+                        "query" to string("搜索关键词", 200),
+                    ),
+                    "query",
+                ),
+            )
+            .put(
+                function(
+                    "open_device_action",
+                    "一键打开常用系统页面：相机、拨号、设置、WiFi、蓝牙、闹钟、浏览器。",
+                    properties(
+                        "action" to enumString(
+                            "目标页面",
+                            "camera", "dialer", "settings", "wifi", "bluetooth", "alarms", "browser",
+                        ),
+                    ),
+                    "action",
+                ),
+            )
+            .put(
+                function(
                     "set_volume",
                     "直接设置系统音量，不要操作音量 GUI。",
                     properties(

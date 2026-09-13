@@ -6,8 +6,10 @@ import android.app.Notification
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
+import android.app.SearchManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
@@ -15,6 +17,7 @@ import android.os.Environment
 import android.os.StatFs
 import android.os.SystemClock
 import android.provider.AlarmClock
+import android.provider.MediaStore
 import android.provider.Settings
 import android.view.KeyEvent
 import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
@@ -57,6 +60,9 @@ internal class AgentStructuredDeviceTools(
             "top_memory_apps" -> text(topMemoryApps(args))
             "top_storage_apps" -> text(topStorageApps(args))
             "media_control" -> text(mediaControl(args))
+            "play_music" -> text(playMusic(args))
+            "web_search" -> text(webSearch(args))
+            "open_device_action" -> text(openDeviceAction(args))
             "set_volume" -> text(setVolume(args))
             "get_setting" -> sensitive(getSetting(args))
             "wifi_credentials" -> sensitive(wifiCredentials(args))
@@ -283,6 +289,74 @@ internal class AgentStructuredDeviceTools(
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
         return ok("media_control").put("action", args.getString("action")).toString()
+    }
+
+    /** 按歌名/歌手搜索并播放：交给系统音乐应用，一步到位（比多步 GUI 操作快得多）。 */
+    private fun playMusic(args: JSONObject): String {
+        val query = args.optString("query").trim()
+        if (query.isBlank()) return error("INVALID_ARGUMENT", "缺少歌曲或歌手名称")
+        val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(SearchManager.QUERY, query)
+        }
+        if (intent.resolveActivity(context.packageManager) != null) {
+            return runCatching { context.startActivity(intent) }.fold(
+                onSuccess = { ok("play_music").put("query", query).put("via", "system").toString() },
+                onFailure = { error("START_FAILED", "音乐应用启动失败") },
+            )
+        }
+        // 兜底：没有支持该意图的音乐应用时，用浏览器搜索该歌曲
+        val fallback = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://www.bing.com/search?q=" + Uri.encode("$query 歌曲 在线播放")),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(fallback) }.fold(
+            onSuccess = { ok("play_music").put("query", query).put("via", "browser").toString() },
+            onFailure = { error("NO_MUSIC_APP", "没有可用的音乐应用或浏览器") },
+        )
+    }
+
+    /** 快速网页搜索：交给系统搜索能力，直接展示搜索结果。 */
+    private fun webSearch(args: JSONObject): String {
+        val query = args.optString("query").trim()
+        if (query.isBlank()) return error("INVALID_ARGUMENT", "缺少搜索关键词")
+        val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(SearchManager.QUERY, query)
+        }
+        if (intent.resolveActivity(context.packageManager) != null) {
+            return runCatching { context.startActivity(intent) }.fold(
+                onSuccess = { ok("web_search").put("query", query).put("via", "system").toString() },
+                onFailure = { error("START_FAILED", "搜索启动失败") },
+            )
+        }
+        val fallback = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://www.bing.com/search?q=" + Uri.encode(query)),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(fallback) }.fold(
+            onSuccess = { ok("web_search").put("query", query).put("via", "browser").toString() },
+            onFailure = { error("NO_BROWSER", "没有可用的浏览器") },
+        )
+    }
+
+    /** 一键打开常用系统页面，省去在设置里逐层查找。 */
+    private fun openDeviceAction(args: JSONObject): String {
+        val action = args.optString("action").lowercase(Locale.ROOT)
+        val intent = when (action) {
+            "camera" -> Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+            "dialer" -> Intent(Intent.ACTION_DIAL)
+            "settings" -> Intent(Settings.ACTION_SETTINGS)
+            "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
+            "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+            "alarms" -> Intent(AlarmClock.ACTION_SHOW_ALARMS)
+            "browser" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://www.bing.com"))
+            else -> return error("INVALID_ARGUMENT", "不支持的动作: $action")
+        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(intent) }.fold(
+            onSuccess = { ok("open_device_action").put("action", action).toString() },
+            onFailure = { error("START_FAILED", "无法打开该页面") },
+        )
     }
 
     private fun setVolume(args: JSONObject): String {
