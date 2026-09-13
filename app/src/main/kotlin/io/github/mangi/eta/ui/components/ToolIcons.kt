@@ -96,6 +96,9 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
         Icons.Rounded.Smartphone
     "network_info", "wifi_credentials" -> Icons.Rounded.Wifi
     "media_control" -> Icons.Rounded.PlayArrow
+    "play_music" -> Icons.Rounded.MusicNote
+    "web_search" -> Icons.Rounded.Search
+    "open_device_action" -> Icons.AutoMirrored.Rounded.OpenInNew
     "set_volume" -> Icons.AutoMirrored.Rounded.VolumeUp
     "top_memory_apps", "top_storage_apps" -> Icons.Rounded.Layers
     "read_sms_code" -> Icons.Rounded.Key
