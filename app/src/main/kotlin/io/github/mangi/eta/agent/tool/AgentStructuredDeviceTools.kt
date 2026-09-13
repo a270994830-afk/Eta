@@ -291,21 +291,27 @@ internal class AgentStructuredDeviceTools(
         return ok("media_control").put("action", args.getString("action")).toString()
     }
 
-    /** 按歌名/歌手搜索并播放：交给系统音乐应用，一步到位（比多步 GUI 操作快得多）。 */
+    /** 按歌名/歌手搜索并播放：优先交给默认音乐应用，一步到位。 */
     private fun playMusic(args: JSONObject): String {
         val query = args.optString("query").trim()
         if (query.isBlank()) return error("INVALID_ARGUMENT", "缺少歌曲或歌手名称")
-        val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+        // 1) 系统媒体搜索播放（由系统路由给默认音乐应用）
+        //    注意：不能用 resolveActivity 预检，Android 11+ 包可见性会让它误报为“无可用应用”。
+        val playIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(SearchManager.QUERY, query)
         }
-        if (intent.resolveActivity(context.packageManager) != null) {
-            return runCatching { context.startActivity(intent) }.fold(
-                onSuccess = { ok("play_music").put("query", query).put("via", "system").toString() },
-                onFailure = { error("START_FAILED", "音乐应用启动失败") },
-            )
+        runCatching { context.startActivity(playIntent) }.onSuccess {
+            return ok("play_music").put("query", query).put("via", "system_media_search").toString()
         }
-        // 兜底：没有支持该意图的音乐应用时，用浏览器搜索该歌曲
+        // 2) 退一步：打开默认音乐应用主的“音乐”入口
+        val musicApp = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_APP_MUSIC)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(musicApp) }.onSuccess {
+            return ok("play_music").put("query", query).put("via", "music_app").toString()
+        }
+        // 3) 最后才回退浏览器搜索
         val fallback = Intent(
             Intent.ACTION_VIEW,
             Uri.parse("https://www.bing.com/search?q=" + Uri.encode("$query 歌曲 在线播放")),
@@ -320,15 +326,13 @@ internal class AgentStructuredDeviceTools(
     private fun webSearch(args: JSONObject): String {
         val query = args.optString("query").trim()
         if (query.isBlank()) return error("INVALID_ARGUMENT", "缺少搜索关键词")
+        // 同样不做 resolveActivity 预检，避免包可见性误判
         val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(SearchManager.QUERY, query)
         }
-        if (intent.resolveActivity(context.packageManager) != null) {
-            return runCatching { context.startActivity(intent) }.fold(
-                onSuccess = { ok("web_search").put("query", query).put("via", "system").toString() },
-                onFailure = { error("START_FAILED", "搜索启动失败") },
-            )
+        runCatching { context.startActivity(intent) }.onSuccess {
+            return ok("web_search").put("query", query).put("via", "system").toString()
         }
         val fallback = Intent(
             Intent.ACTION_VIEW,
