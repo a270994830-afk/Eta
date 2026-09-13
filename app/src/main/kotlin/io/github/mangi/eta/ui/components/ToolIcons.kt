@@ -46,7 +46,9 @@ import androidx.compose.material.icons.rounded.OndemandVideo
 import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.RadioButtonChecked
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.ScreenshotMonitor
@@ -113,6 +115,8 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "flashlight" -> Icons.Rounded.FlashlightOn
     "send_sms" -> Icons.Rounded.Sms
     "set_brightness" -> Icons.Rounded.Brightness6
+    "flow_start_recording", "flow_stop_recording" -> Icons.Rounded.RadioButtonChecked
+    "flows_list", "flow_run", "flow_delete" -> Icons.Rounded.PlaylistPlay
     "set_volume" -> Icons.AutoMirrored.Rounded.VolumeUp
     "top_memory_apps", "top_storage_apps" -> Icons.Rounded.Layers
     "read_sms_code" -> Icons.Rounded.Key

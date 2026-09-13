@@ -169,9 +169,8 @@ internal class AgentLocalTools(
                     )
                 }
             }
-            when (toolCall.name) {
-                "get_current_context" -> textResult(DeviceContextTool.current(context))
-                "search_apps" -> textResult(searchApps(args))
+            val toolResult = when (toolCall.name) {
+                "get_current_context" -> textResult(DeviceContextTool.current(context))                "search_apps" -> textResult(searchApps(args))
                 "launch_app" -> textResult(launchApp(args))
                 "open_uri" -> textResult(openUri(args))
                 "browser_use" -> browserUse(args, toolCall.id)
@@ -195,6 +194,11 @@ internal class AgentLocalTools(
                 "wait_for_text" -> textResult(waitForText(args))
                 "wait_for_package" -> textResult(waitForPackage(args))
                 "open_system_panel" -> textResult(deviceController.openSystemPanel(args.optString("panel")))
+                "flow_start_recording" -> textResult(flowStartRecording(args))
+                "flow_stop_recording" -> textResult(flowStopRecording(args))
+                "flows_list" -> textResult(flowsList())
+                "flow_run" -> textResult(flowRun(args))
+                "flow_delete" -> textResult(flowDelete(args))
                 in DEVICE_TOOL_NAMES ->
                     structuredDeviceTools.execute(toolCall.name, args)
                         ?: textResult(errorResult("UNKNOWN_TOOL", "未知设备工具"))
@@ -219,6 +223,8 @@ internal class AgentLocalTools(
                     )
                 )
             }
+            recordGuiStepIfNeeded(toolCall.name, args, toolResult)
+            toolResult
         }.getOrElse { throwable ->
             textResult(
                 errorResult(
@@ -557,6 +563,256 @@ internal class AgentLocalTools(
             packageName = args.optString("package_name"),
             timeoutMs = args.optInt("timeout_ms", 10_000)
         )
+
+    // ==================== 语义流程（录制/回放） ====================
+
+    private fun flowStartRecording(args: JSONObject): String {
+        val name = args.optString("name").trim()
+        if (name.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少流程名")
+        if (!AgentFlowStore.startRecording(name, args.optString("description"))) {
+            return errorResult("INVALID_ARGUMENT", "流程名无效")
+        }
+        return JSONObject()
+            .put("ok", true)
+            .put("recording", name)
+            .put("message", "录制已开启：接下来用普通 GUI 工具完成任务，成功后调用 flow_stop_recording 保存")
+            .toString()
+    }
+
+    private fun flowStopRecording(args: JSONObject): String {
+        val save = args.optBoolean("save", true)
+        val name = AgentFlowStore.currentRecordingName()
+            ?: return errorResult("NOT_RECORDING", "当前没有进行中的录制")
+        val flow = AgentFlowStore.stopRecording(AgentFlowStore.storeFile(context), save)
+        return if (flow != null) {
+            JSONObject()
+                .put("ok", true)
+                .put("saved", true)
+                .put("flow", flow.name)
+                .put("steps", flow.steps.size)
+                .put("message", "流程已保存，下次可用 flow_run 回放")
+                .toString()
+        } else {
+            JSONObject()
+                .put("ok", true)
+                .put("saved", false)
+                .put("flow", name)
+                .put("message", "录制已结束且未保存")
+                .toString()
+        }
+    }
+
+    private fun flowsList(): String {
+        val flows = AgentFlowStore.listFlows(AgentFlowStore.storeFile(context))
+        val items = JSONArray()
+        flows.forEach { flow ->
+            items.put(
+                JSONObject()
+                    .put("name", flow.name)
+                    .put("description", flow.description)
+                    .put("steps", flow.steps.size)
+                    .put("use_count", flow.useCount)
+            )
+        }
+        return JSONObject().put("ok", true).put("flows", items).toString()
+    }
+
+    private fun flowDelete(args: JSONObject): String {
+        val name = args.optString("name").trim()
+        if (name.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少流程名")
+        return if (AgentFlowStore.deleteFlow(AgentFlowStore.storeFile(context), name)) {
+            JSONObject().put("ok", true).put("deleted", name).toString()
+        } else {
+            errorResult("FLOW_NOT_FOUND", "未找到流程：$name")
+        }
+    }
+
+    private fun flowRun(args: JSONObject): String {
+        val name = args.optString("name").trim()
+        if (name.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少流程名")
+        val storeFile = AgentFlowStore.storeFile(context)
+        val flow = AgentFlowStore.findFlow(storeFile, name)
+            ?: return errorResult("FLOW_NOT_FOUND", "未找到流程：$name")
+        val params = args.optJSONObject("params") ?: JSONObject()
+        flow.steps.forEachIndexed { index, step ->
+            val result = executeFlowStep(step.action, substituteParams(step.args, params))
+            if (!result.isOkJson()) {
+                return JSONObject()
+                    .put("ok", false)
+                    .put("code", "FLOW_STEP_FAILED")
+                    .put(
+                        "message",
+                        "流程「${flow.name}」第 ${index + 1}/${flow.steps.size} 步（${step.action}）执行失败，已中止回放；" +
+                            "请改用 observe_screen + tap_element 等手动方式完成剩余部分",
+                    )
+                    .put("step_index", index)
+                    .put("step_action", step.action)
+                    .put(
+                        "step_error",
+                        runCatching { JSONObject(result).optString("message") }.getOrDefault(result.take(200)),
+                    )
+                    .toString()
+            }
+        }
+        AgentFlowStore.bumpUseCount(storeFile, flow.name)
+        return JSONObject()
+            .put("ok", true)
+            .put("flow", flow.name)
+            .put("steps", flow.steps.size)
+            .put("message", "流程回放完成")
+            .toString()
+    }
+
+    private fun executeFlowStep(action: String, stepArgs: JSONObject): String = when (action) {
+        "launch_app" -> launchApp(stepArgs)
+        "open_uri" -> openUri(stepArgs)
+        "tap_text" -> flowTapText(stepArgs)
+        "tap_xy" -> tap(stepArgs)
+        "input_text" -> inputText(stepArgs)
+        "replace_text" -> replaceText(stepArgs)
+        "clear_text" -> clearText(stepArgs)
+        "swipe" -> swipe(stepArgs)
+        "scroll" -> deviceController.scroll(stepArgs.optString("direction"))
+        "press_key" -> deviceController.pressKey(stepArgs.optString("button"))
+        "wait_text" -> waitForText(stepArgs)
+        "wait_package" -> waitForPackage(stepArgs)
+        else -> errorResult("UNKNOWN_FLOW_STEP", "未知步骤类型: $action")
+    }
+
+    /** 回放的语义点击：重新观察当前屏幕，按文本/描述匹配元素后点击，容忍界面小幅变化。 */
+    private fun flowTapText(stepArgs: JSONObject): String {
+        val target = stepArgs.optString("text").trim()
+        if (target.isEmpty()) return errorResult("INVALID_ARGUMENT", "tap_text 缺少 text")
+        val observation = deviceController.observe(
+            includeScreenshot = false,
+            includeUiTree = true,
+            maxNodes = 120,
+        )
+        val elements = observation.elementObservation
+            ?: return errorResult("NO_OBSERVATION", "无法获取当前屏幕节点；请确认无障碍服务已开启")
+        val node = elements.nodes.firstOrNull {
+            (it.text.contains(target) || it.desc.contains(target)) && it.clickable
+        } ?: elements.nodes.firstOrNull {
+            it.text.contains(target) || it.desc.contains(target)
+        } ?: return errorResult(
+            code = "ELEMENT_NOT_FOUND",
+            message = "当前屏幕未找到包含「$target」的元素；界面可能已变化，请改用 observe_screen + tap_element 手动继续",
+        )
+        publishedObservation.set(
+            PublishedObservation(
+                elements = elements,
+                coordinateSpace = observation.coordinateSpace,
+            ),
+        )
+        return tapElement(
+            JSONObject().put("index", node.index).put("observation_id", elements.id),
+        )
+    }
+
+    private fun substituteParams(stepArgs: JSONObject, params: JSONObject): JSONObject {
+        if (params.length() == 0) return stepArgs
+        val result = JSONObject()
+        stepArgs.keys().forEach { key ->
+            var value = stepArgs.optString(key)
+            params.keys().forEach { paramKey ->
+                value = value.replace("{$paramKey}", params.optString(paramKey))
+            }
+            result.put(key, value)
+        }
+        return result
+    }
+
+    /** 录制中：把成功的 GUI 工具调用转成语义步骤存入录制会话。 */
+    private fun recordGuiStepIfNeeded(
+        toolName: String,
+        args: JSONObject,
+        result: AgentModelClient.ToolResult,
+    ) {
+        if (!AgentFlowStore.isRecording) return
+        if (!result.content.isOkJson()) return
+        val step = semanticStepFor(toolName, args) ?: return
+        AgentFlowStore.recordStep(step)
+    }
+
+    private fun semanticStepFor(toolName: String, args: JSONObject): AgentFlowStore.FlowStep? {
+        return when (toolName) {
+            "launch_app" -> AgentFlowStore.FlowStep(
+                "launch_app",
+                JSONObject().put("package_name", args.optString("package_name")),
+            )
+            "open_uri" -> AgentFlowStore.FlowStep(
+                "open_uri",
+                JSONObject().put("uri", args.optString("uri")),
+            )
+            "tap" -> {
+                val point = convertPoint(args.optInt("x"), args.optInt("y"), args.optString("coordinate_space"))
+                AgentFlowStore.FlowStep(
+                    "tap_xy",
+                    JSONObject()
+                        .put("x", point.x)
+                        .put("y", point.y)
+                        .put("coordinate_space", "screen"),
+                )
+            }
+            "tap_element" -> {
+                val observation = requireElementObservation(args) ?: return null
+                val node = observation.nodes.firstOrNull { it.index == args.optInt("index", -1) } ?: return null
+                val label = node.text.ifBlank { node.desc }.ifBlank { return null }
+                AgentFlowStore.FlowStep(
+                    "tap_text",
+                    JSONObject()
+                        .put("text", label.take(80))
+                        .put("fallback_x", node.bounds.centerX())
+                        .put("fallback_y", node.bounds.centerY())
+                        .put("coordinate_space", "screen"),
+                )
+            }
+            "input_text" -> AgentFlowStore.FlowStep(
+                "input_text",
+                JSONObject().put("text", args.optString("text")).put("mode", args.optString("mode", "append")),
+            )
+            "replace_text" -> AgentFlowStore.FlowStep(
+                "replace_text",
+                JSONObject().put("text", args.optString("text")),
+            )
+            "clear_text" -> AgentFlowStore.FlowStep("clear_text", JSONObject())
+            "swipe" -> {
+                val start = convertPoint(args.optInt("x1"), args.optInt("y1"), args.optString("coordinate_space"))
+                val end = convertPoint(args.optInt("x2"), args.optInt("y2"), args.optString("coordinate_space"))
+                AgentFlowStore.FlowStep(
+                    "swipe",
+                    JSONObject()
+                        .put("x1", start.x)
+                        .put("y1", start.y)
+                        .put("x2", end.x)
+                        .put("y2", end.y)
+                        .put("duration_ms", args.optInt("duration_ms", 500))
+                        .put("coordinate_space", "screen"),
+                )
+            }
+            "scroll" -> AgentFlowStore.FlowStep(
+                "scroll",
+                JSONObject().put("direction", args.optString("direction")),
+            )
+            "press_key" -> AgentFlowStore.FlowStep(
+                "press_key",
+                JSONObject().put("button", args.optString("button")),
+            )
+            "wait_for_text" -> AgentFlowStore.FlowStep(
+                "wait_text",
+                JSONObject()
+                    .put("text", args.optString("text"))
+                    .put("timeout_ms", args.optInt("timeout_ms", 10_000)),
+            )
+            "wait_for_package" -> AgentFlowStore.FlowStep(
+                "wait_package",
+                JSONObject()
+                    .put("package_name", args.optString("package_name"))
+                    .put("timeout_ms", args.optInt("timeout_ms", 10_000)),
+            )
+            else -> null
+        }
+    }
 
     private fun convertPoint(x: Int, y: Int, coordinateSpace: String): ScreenPoint {
         val space = publishedObservation.get().coordinateSpace
