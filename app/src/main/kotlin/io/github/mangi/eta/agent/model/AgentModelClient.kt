@@ -28,51 +28,10 @@ internal object AgentModelClient {
     }
     private val traceFormatter = AgentTraceFormatter()
 
-    private val LOCAL_TOOL_WHITELIST = setOf(
-        "set_alarm",
-        "set_timer",
-        "list_alarms",
-        "list_active_timers",
-        "media_control",
-        "search_media",
-        "set_volume",
-        "browser_use",
-        "launch_app",
-        "open_uri",
-    )
-
-    /** 关键词兑底：工具名不完全匹配白名单时，按关键词保留。 */
-    private val LOCAL_TOOL_KEYWORDS = listOf(
-        "alarm",
-        "timer",
-        "media",
-        "volume",
-        "brightness",
-        "browser",
-        "launch_app",
-        "open_uri",
-    )
-
     /**
      * 判断提供商是否指向本机/内网推理服务。本地模型 prompt 预算小，
      * 运行时跳过技能索引与技能工具注入，避免请求超出上下文或变得很慢。
      */
-    /**
-     * 本地小模型只保留少数常用工具（闹钟/音乐/音量/搜索/打开应用），
-     * 把工具定义控制在能接受的 prompt 规模；无匹配时返回空列表。
-     */
-    private fun filterLocalTools(tools: JSONArray): JSONArray {
-        val filtered = JSONArray()
-        for (index in 0 until tools.length()) {
-            val item = tools.optJSONObject(index) ?: continue
-            val name = item.optJSONObject("function")?.optString("name").orEmpty()
-            val matched = name in LOCAL_TOOL_WHITELIST ||
-                LOCAL_TOOL_KEYWORDS.any { keyword -> name.contains(keyword) }
-            if (matched) filtered.put(item)
-        }
-        return filtered
-    }
-
     private fun isLocalEndpoint(baseUrl: String): Boolean {
         val value = baseUrl.lowercase()
         return value.contains("127.0.0.1") ||
@@ -212,14 +171,13 @@ internal object AgentModelClient {
                 memoryTools = memoryContext.enabled,
                 memoryWritable = roleplayContext == null,
                 skillTools = includeSkills,
-                toolsEnabled = true,
+                toolsEnabled = !localModel,
                 capabilities = capabilities,
             )
             for (index in 0 until additionalTools.length()) {
                 tools.put(additionalTools.opt(index))
             }
-            // 本地小模型：只保留少量常用工具，避免工具 schema 撑大 prompt。
-            return if (localModel) filterLocalTools(tools) else tools
+            return tools
         }
         val tools = toolsFor(initialCapabilities)
         onEvent(
