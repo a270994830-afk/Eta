@@ -61,8 +61,12 @@ internal class AgentStructuredDeviceTools(
             "top_storage_apps" -> text(topStorageApps(args))
             "media_control" -> text(mediaControl(args))
             "play_music" -> text(playMusic(args))
+            "play_video" -> text(playVideo(args))
             "web_search" -> text(webSearch(args))
             "open_device_action" -> text(openDeviceAction(args))
+            "order_food" -> text(orderFood(args))
+            "stock" -> text(stockQuote(args))
+            "short_video" -> text(shortVideo(args))
             "set_volume" -> text(setVolume(args))
             "get_setting" -> sensitive(getSetting(args))
             "wifi_credentials" -> sensitive(wifiCredentials(args))
@@ -370,6 +374,128 @@ internal class AgentStructuredDeviceTools(
         return runCatching { context.startActivity(play) }
             .onFailure { logger.info("play_music 本地曲目启动失败: ${it.message}") }
             .getOrNull()?.let { title }
+    }
+
+    /** 在本地视频库中按片名匹配一个视频并交给默认播放器；未命中返回 null。 */
+    private fun playLocalVideo(query: String): String? {
+        val cleaned = query.trim()
+        if (cleaned.isEmpty()) return null
+        val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        val like = "%$cleaned%"
+        val trackUri = runCatching {
+            context.contentResolver.query(
+                collection,
+                arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.TITLE),
+                "${MediaStore.Video.Media.TITLE} LIKE ? OR ${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?",
+                arrayOf(like, like),
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(0)
+                    val title = cursor.getString(1) ?: ""
+                    Uri.withAppendedPath(collection, id.toString()) to title
+                } else null
+            }
+        }.getOrNull()
+        val (uri, title) = trackUri ?: return null
+        val play = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "video/*")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return runCatching { context.startActivity(play) }
+            .onFailure { logger.info("play_video 本地视频启动失败: ${it.message}") }
+            .getOrNull()?.let { title }
+    }
+
+    /** 按片名播放视频：优先本地视频库精确匹配，再交给默认视频应用。 */
+    private fun playVideo(args: JSONObject): String {
+        val query = args.optString("query").trim()
+        if (query.isBlank()) return error("INVALID_ARGUMENT", "缺少影片名称")
+        // 1) 本地视频库精确匹配，同 play_music 的本地曲目思路
+        playLocalVideo(query)?.let { title ->
+            return ok("play_video").put("query", query)
+                .put("via", "local_video").put("title", title).toString()
+        }
+        // 2) 系统媒体搜索播放（在线视频场景）
+        val playIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(SearchManager.QUERY, query)
+            putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/video")
+        }
+        runCatching { context.startActivity(playIntent) }.onSuccess {
+            return ok("play_video").put("query", query).put("via", "system_media_search").toString()
+        }
+        // 3) 打开默认视频应用入口
+        val videoApp = Intent(Intent.ACTION_MAIN)
+            .addCategory("android.intent.category.APP_VIDEO")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(videoApp) }.onSuccess {
+            return ok("play_video").put("query", query).put("via", "video_app").toString()
+        }
+        // 4) 回退浏览器搜索
+        return browserFallback("play_video", "$query 视频 在线播放")
+            ?: error("NO_VIDEO_APP", "没有可用的视频应用或浏览器")
+    }
+
+    /** 点外卖：直接拉起已装的外卖应用，选择交给用户在应用内完成。 */
+    private fun orderFood(args: JSONObject): String {
+        val app = args.optString("app").trim().lowercase(Locale.ROOT).ifEmpty { "any" }
+        val candidates = when (app) {
+            "meituan" -> listOf("com.sankuai.meituan.takeoutnew", "com.sankuai.meituan")
+            "eleme" -> listOf("me.ele")
+            else -> listOf("com.sankuai.meituan.takeoutnew", "com.sankuai.meituan", "me.ele")
+        }
+        launchFirstInstalled(candidates)?.let { pkg ->
+            return ok("order_food").put("app", pkg).put("via", "app_launch").toString()
+        }
+        val keyword = if (app == "eleme") "饿了么" else "美团外卖"
+        return browserFallback("order_food", "$keyword 外卖")
+            ?: error("NO_FOOD_APP", "没有安装外卖应用，也没有可用的浏览器")
+    }
+
+    /** 查股票行情：优先拉起已装的行情应用，否则浏览器搜索。 */
+    private fun stockQuote(args: JSONObject): String {
+        val query = args.optString("query").trim()
+        if (query.isBlank()) return error("INVALID_ARGUMENT", "缺少股票名称或代码")
+        launchFirstInstalled(listOf("com.xueqiu.android", "com.hexin.plat.android"))?.let { pkg ->
+            return ok("stock").put("query", query).put("app", pkg).put("via", "stock_app").toString()
+        }
+        return browserFallback("stock", "$query 股价 行情")
+            ?: error("NO_STOCK_APP", "没有安装行情应用，也没有可用的浏览器")
+    }
+
+    /** 刷短视频：直接拉起指定的短视频应用。 */
+    private fun shortVideo(args: JSONObject): String {
+        val app = args.optString("app").trim().lowercase(Locale.ROOT).ifEmpty { "any" }
+        val candidates = when (app) {
+            "douyin" -> listOf("com.ss.android.ugc.aweme", "com.ss.android.ugc.aweme.lite")
+            "kuaishou" -> listOf("com.smile.gifmaker", "com.kuaishou.nebula")
+            else -> listOf("com.ss.android.ugc.aweme", "com.ss.android.ugc.aweme.lite", "com.smile.gifmaker", "com.kuaishou.nebula")
+        }
+        launchFirstInstalled(candidates)?.let { pkg ->
+            return ok("short_video").put("app", pkg).put("via", "app_launch").toString()
+        }
+        return error("NO_SHORT_VIDEO_APP", "没有安装抖音或快手")
+    }
+
+    /** 依次尝试启动已安装应用，返回成功启动的包名；全部失败返回 null。 */
+    private fun launchFirstInstalled(packages: List<String>): String? {
+        for (pkg in packages) {
+            val intent = context.packageManager.getLaunchIntentForPackage(pkg) ?: continue
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (runCatching { context.startActivity(intent) }.isSuccess) return pkg
+        }
+        return null
+    }
+
+    /** 浏览器搜索兜底；成功返回结果对象，失败返回 null。 */
+    private fun browserFallback(tool: String, keyword: String): String? {
+        val fallback = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://www.bing.com/search?q=" + Uri.encode(keyword)),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(fallback) }
+            .getOrNull()?.let { ok(tool).put("keyword", keyword).put("via", "browser").toString() }
     }
 
     /** 快速网页搜索：交给系统搜索能力，直接展示搜索结果。 */

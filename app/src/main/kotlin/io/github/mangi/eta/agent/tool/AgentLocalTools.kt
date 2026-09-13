@@ -1330,8 +1330,12 @@ internal class AgentLocalTools(
             "media_control",
             "set_volume",
             "play_music",
+            "play_video",
             "web_search",
             "open_device_action",
+            "order_food",
+            "stock",
+            "short_video",
         )
         val DEVICE_SENSITIVE_READ_TOOL_NAMES = setOf(
             "get_setting",

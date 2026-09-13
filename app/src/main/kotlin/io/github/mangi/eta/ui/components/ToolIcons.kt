@@ -6,6 +6,7 @@ import androidx.compose.material.icons.automirrored.rounded.ManageSearch
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.StickyNote2
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AdsClick
@@ -38,10 +39,12 @@ import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.OndemandVideo
 import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.ScreenshotMonitor
 import androidx.compose.material.icons.rounded.Search
@@ -97,8 +100,11 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "network_info", "wifi_credentials" -> Icons.Rounded.Wifi
     "media_control" -> Icons.Rounded.PlayArrow
     "play_music" -> Icons.Rounded.MusicNote
+    "play_video", "short_video" -> Icons.Rounded.OndemandVideo
     "web_search" -> Icons.Rounded.Search
     "open_device_action" -> Icons.AutoMirrored.Rounded.OpenInNew
+    "order_food" -> Icons.Rounded.Restaurant
+    "stock" -> Icons.AutoMirrored.Rounded.TrendingUp
     "set_volume" -> Icons.AutoMirrored.Rounded.VolumeUp
     "top_memory_apps", "top_storage_apps" -> Icons.Rounded.Layers
     "read_sms_code" -> Icons.Rounded.Key

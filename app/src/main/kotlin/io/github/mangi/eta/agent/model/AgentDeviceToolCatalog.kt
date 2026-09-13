@@ -75,6 +75,16 @@ internal object AgentDeviceToolCatalog {
             )
             .put(
                 function(
+                    "play_video",
+                    "按片名播放视频。优先本地视频库，未命中再走在线视频。要播放指定视频时优先使用本工具。",
+                    properties(
+                        "query" to string("影片名称或关键词", 100),
+                    ),
+                    "query",
+                ),
+            )
+            .put(
+                function(
                     "web_search",
                     "快速网页搜索：把关键词交给系统搜索并展示结果。需要给用户看搜索结果时优先使用本工具。",
                     properties(
@@ -94,6 +104,34 @@ internal object AgentDeviceToolCatalog {
                         ),
                     ),
                     "action",
+                ),
+            )
+            .put(
+                function(
+                    "order_food",
+                    "点外卖：直接拉起已安装的外卖应用（美团外卖/饿了么），选餐下单在应用内完成。",
+                    properties(
+                        "app" to enumString("外卖平台，默认自动选择已装的", "any", "meituan", "eleme"),
+                    ),
+                ),
+            )
+            .put(
+                function(
+                    "stock",
+                    "查股票行情：优先拉起已装的行情应用（雪球/同花顺），否则浏览器搜索行情。",
+                    properties(
+                        "query" to string("股票名称或代码", 50),
+                    ),
+                    "query",
+                ),
+            )
+            .put(
+                function(
+                    "short_video",
+                    "刷短视频：直接拉起抖音或快手。不负责具体视频的选择与点赞等操作。",
+                    properties(
+                        "app" to enumString("短视频应用，默认自动选择已装的", "any", "douyin", "kuaishou"),
+                    ),
                 ),
             )
             .put(
