@@ -561,6 +561,7 @@ internal class AgentTraceFormatter {
             "flashlight" to "手电筒",
             "send_sms" to "发短信",
             "call" to "拨打电话",
+            "reply_notification" to "通知直达回复",
             "set_brightness" to "调亮度",
             "flow_start_recording" to "开始录制流程",
             "flow_stop_recording" to "结束录制流程",

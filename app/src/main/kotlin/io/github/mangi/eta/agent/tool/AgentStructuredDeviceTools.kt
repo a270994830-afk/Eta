@@ -3,6 +3,7 @@ package io.github.mangi.eta.agent.tool
 import android.app.ActivityManager
 import android.app.AlarmManager
 import android.app.Notification
+import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
@@ -13,12 +14,14 @@ import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
 import android.os.SystemClock
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import android.provider.Settings
+import android.service.notification.StatusBarNotification
 import android.view.KeyEvent
 import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
 import io.github.mangi.eta.agent.device.RootAccess
@@ -83,6 +86,7 @@ internal class AgentStructuredDeviceTools(
             "app_state_control" -> text(appStateControl(args))
             "send_sms" -> text(sendSms(args))
             "call" -> text(call(args))
+            "reply_notification" -> text(replyNotification(args))
             "set_brightness" -> text(setBrightness(args))
             else -> null
         }
@@ -595,6 +599,50 @@ internal class AgentStructuredDeviceTools(
             },
             onFailure = { error("CALL_FAILED", "无法发起通话: ${it.message}") },
         )
+    }
+
+    /** 通知直达回复：不打开 App，从通知栏直接回复（微信/QQ 等支持“直接回复”的会话）。 */
+    private fun replyNotification(args: JSONObject): String {
+        val query = args.optString("query").trim()
+        val reply = args.optString("reply").trim()
+        if (reply.isEmpty()) return error("INVALID_ARGUMENT", "缺少回复内容")
+        if (!AgentNotificationHistoryService.isEnabled(context)) {
+            return error("NOTIFICATION_ACCESS_REQUIRED", "请先在系统设置中授予 Eta 通知使用权")
+        }
+        val notifications = AgentNotificationHistoryService.currentNotifications()
+            ?: return error("NO_NOTIFICATIONS", "无法读取当前通知，请确认通知使用权已开启")
+        data class Candidate(val sbn: StatusBarNotification, val action: Notification.Action, val score: Int)
+        val candidates = mutableListOf<Candidate>()
+        for (sbn in notifications) {
+            val actions = sbn.notification.actions ?: continue
+            for (action in actions) {
+                if (action.remoteInputs.isNullOrEmpty()) continue
+                val title = sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+                val text = sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+                val hay = "$title $text"
+                val score = when {
+                    query.isNotBlank() && hay.contains(query, ignoreCase = true) -> 2
+                    query.isBlank() -> 1
+                    else -> 0
+                }
+                if (score > 0) candidates.add(Candidate(sbn, action, score))
+            }
+        }
+        if (candidates.isEmpty()) {
+            return error("NO_REPLYABLE_NOTIFICATION", "当前通知栏没有可回复的消息；若刚收到消息请先查看通知")
+        }
+        val best = candidates.maxByOrNull { it.score } ?: candidates.first()
+        return try {
+            val results = Bundle()
+            results.putCharSequence(best.action.remoteInputs.first().resultKey, reply)
+            val fillIn = Intent()
+            RemoteInput.addResultsToIntent(best.action.remoteInputs, fillIn, results)
+            best.action.actionIntent.send(context, 0, fillIn)
+            val title = best.sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+            ok("reply_notification").put("replied_to", title.ifBlank { best.sbn.packageName }).toString()
+        } catch (e: Exception) {
+            error("REPLY_FAILED", "回复失败: ${e.message}")
+        }
     }
 
     /** 设置屏幕亮度；需要“修改系统设置”特殊权限。 */

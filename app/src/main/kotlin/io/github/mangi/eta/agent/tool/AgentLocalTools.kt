@@ -1742,6 +1742,7 @@ internal class AgentLocalTools(
             "app_state_control",
             "send_sms",
             "set_brightness",
+            "reply_notification",
         )
         val DEVICE_TOOL_NAMES =
             DEVICE_DIRECT_TOOL_NAMES + DEVICE_SENSITIVE_READ_TOOL_NAMES +

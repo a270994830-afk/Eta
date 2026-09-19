@@ -36,6 +36,7 @@ internal object AgentToolRequirements {
             "order_food", "stock", "short_video", "navigate", "flashlight",
             "send_sms", "set_brightness",
             "call",
+            "reply_notification",
             "flow_start_recording", "flow_stop_recording", "flows_list", "flow_run", "flow_update", "flow_delete",
             "tap_text",
             "search_notification_history", "recent_app_activity", "app_usage_summary",

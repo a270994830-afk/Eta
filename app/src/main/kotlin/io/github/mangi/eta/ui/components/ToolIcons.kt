@@ -5,6 +5,7 @@ import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material.icons.automirrored.rounded.ManageSearch
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.automirrored.rounded.StickyNote2
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
@@ -116,6 +117,7 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "navigate" -> Icons.Rounded.Navigation
     "flashlight" -> Icons.Rounded.FlashlightOn
     "call" -> Icons.Rounded.Phone
+    "reply_notification" -> Icons.AutoMirrored.Rounded.Reply
     "send_sms" -> Icons.Rounded.Sms
     "set_brightness" -> Icons.Rounded.Brightness6
     "flow_start_recording", "flow_stop_recording" -> Icons.Rounded.RadioButtonChecked

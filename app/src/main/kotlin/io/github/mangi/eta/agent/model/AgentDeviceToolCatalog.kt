@@ -176,6 +176,17 @@ internal object AgentDeviceToolCatalog {
             )
             .put(
                 function(
+                    "reply_notification",
+                    "通知直达回复：不打开应用，直接从通知栏回复微信/QQ 等会话。回复刚收到的消息时优先用本工具，不用 GUI。",
+                    properties(
+                        "query" to string("可选：要回复的联系人或会话名，用于匹配通知", 50),
+                        "reply" to string("回复内容", 500),
+                    ),
+                    "reply",
+                ),
+            )
+            .put(
+                function(
                     "send_sms",
                     "给指定手机号发送短信。结果可能产生实际费用与外发行为，仅在用户明确要求时使用。",
                     properties(
