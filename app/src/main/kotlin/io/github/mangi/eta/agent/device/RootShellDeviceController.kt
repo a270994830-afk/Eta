@@ -226,63 +226,59 @@ internal class RootShellDeviceController(
     }
 
     fun tap(x: Int, y: Int, durationMs: Long = 50): String {
-        if (AgentAccessibilityService.current() == null && !rootAvailable()) return accessibilityUnavailable()
         validatePoint(x, y)
-        AgentAccessibilityService.current()?.let { service ->
-            val result = service.gestureTap(x.toFloat(), y.toFloat(), durationMs)
-            if (result.ok) {
-                waitForUiSettle("tap")
-                return nodeActionJson("tap", result)
-            }
-            if (!GestureFallbackPolicy.mayFallbackToRoot(result.code)) {
-                return nodeActionJson("tap", result)
-            }
-            if (!rootAvailable()) return nodeActionJson("tap", result)
+        // 有 root 时优先走 shell input 命令：最稳，不依赖无障碍服务是否连接。
+        if (rootAvailable()) {
+            return inputCommand("input tap $x $y", "tap")
         }
-        return inputCommand("input tap $x $y", "tap")
+        if (AgentAccessibilityService.current() == null) return accessibilityUnavailable()
+        val service = AgentAccessibilityService.current()!!
+        val result = service.gestureTap(x.toFloat(), y.toFloat(), durationMs)
+        return if (result.ok) {
+            waitForUiSettle("tap")
+            nodeActionJson("tap", result)
+        } else {
+            nodeActionJson("tap", result)
+        }
     }
 
     fun longPress(x: Int, y: Int, durationMs: Int): String {
-        if (AgentAccessibilityService.current() == null && !rootAvailable()) return accessibilityUnavailable()
         validatePoint(x, y)
         val duration = durationMs.coerceIn(300, 3_000)
-        AgentAccessibilityService.current()?.let { service ->
-            val result = service.gestureTap(x.toFloat(), y.toFloat(), duration.toLong())
-            if (result.ok) {
-                waitForUiSettle("long_press")
-                return nodeActionJson("long_press", result.copy(method = "GESTURE_LONG_PRESS"))
-            }
-            if (!GestureFallbackPolicy.mayFallbackToRoot(result.code)) {
-                return nodeActionJson("long_press", result)
-            }
-            if (!rootAvailable()) return nodeActionJson("long_press", result)
+        if (rootAvailable()) {
+            return inputCommand("input swipe $x $y $x $y $duration", "long_press")
         }
-        return inputCommand("input swipe $x $y $x $y $duration", "long_press")
+        if (AgentAccessibilityService.current() == null) return accessibilityUnavailable()
+        val result = AgentAccessibilityService.current()!!.gestureTap(x.toFloat(), y.toFloat(), duration.toLong())
+        return if (result.ok) {
+            waitForUiSettle("long_press")
+            nodeActionJson("long_press", result.copy(method = "GESTURE_LONG_PRESS"))
+        } else {
+            nodeActionJson("long_press", result)
+        }
     }
 
     fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): String {
-        if (AgentAccessibilityService.current() == null && !rootAvailable()) return accessibilityUnavailable()
         validatePoint(x1, y1)
         validatePoint(x2, y2)
         val duration = durationMs.coerceIn(100, 2_000)
-        AgentAccessibilityService.current()?.let { service ->
-            val result = service.gestureSwipe(
-                x1.toFloat(),
-                y1.toFloat(),
-                x2.toFloat(),
-                y2.toFloat(),
-                duration.toLong(),
-            )
-            if (result.ok) {
-                waitForUiSettle("swipe")
-                return nodeActionJson("swipe", result)
-            }
-            if (!GestureFallbackPolicy.mayFallbackToRoot(result.code)) {
-                return nodeActionJson("swipe", result)
-            }
-            if (!rootAvailable()) return nodeActionJson("swipe", result)
+        if (rootAvailable()) {
+            return inputCommand("input swipe $x1 $y1 $x2 $y2 $duration", "swipe")
         }
-        return inputCommand("input swipe $x1 $y1 $x2 $y2 $duration", "swipe")
+        if (AgentAccessibilityService.current() == null) return accessibilityUnavailable()
+        val result = AgentAccessibilityService.current()!!.gestureSwipe(
+            x1.toFloat(),
+            y1.toFloat(),
+            x2.toFloat(),
+            y2.toFloat(),
+            duration.toLong(),
+        )
+        return if (result.ok) {
+            waitForUiSettle("swipe")
+            nodeActionJson("swipe", result)
+        } else {
+            nodeActionJson("swipe", result)
+        }
     }
 
     fun scroll(direction: String): String {
