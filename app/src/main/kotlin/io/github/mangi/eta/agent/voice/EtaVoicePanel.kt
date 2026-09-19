@@ -809,7 +809,7 @@ private fun AssistantInputBar(
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val canSubmit = input.isNotBlank() && state.phase != EtaVoicePhase.PROCESSING
+    val canSubmit = input.isNotBlank()
     Row(
         modifier = modifier
             .heightIn(min = 48.dp)
@@ -893,25 +893,25 @@ private fun AssistantInputBar(
                     tint = if (isListening) Color.White else colors.inputSecondary,
                 )
             }
-            IconButton(
-                onClick = onSubmit,
-                enabled = canSubmit,
-                minWidth = 36.dp,
-                minHeight = 36.dp,
-                cornerRadius = 18.dp,
-                backgroundColor = if (canSubmit) {
-                    MiuixTheme.colorScheme.primary
-                } else {
-                    colors.inputTertiary.copy(alpha = 0.35f)
-                },
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                    contentDescription = stringResource(R.string.voice_send),
-                    modifier = Modifier.size(17.dp),
-                    tint = if (canSubmit) Color.White else colors.inputSecondary,
-                )
-            }
+        }
+        IconButton(
+            onClick = onSubmit,
+            enabled = canSubmit,
+            minWidth = 36.dp,
+            minHeight = 36.dp,
+            cornerRadius = 18.dp,
+            backgroundColor = if (canSubmit) {
+                MiuixTheme.colorScheme.primary
+            } else {
+                colors.inputTertiary.copy(alpha = 0.35f)
+            },
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                contentDescription = stringResource(R.string.voice_send),
+                modifier = Modifier.size(17.dp),
+                tint = if (canSubmit) Color.White else colors.inputSecondary,
+            )
         }
     }
 }

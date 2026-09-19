@@ -124,6 +124,7 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
     private var pendingInitialQuery: String? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private var lastResultContent: String = ""
+    private val pendingPrompts = ArrayDeque<String>()
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
     override val savedStateRegistry: SavedStateRegistry
@@ -406,13 +407,44 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
 
     private fun submitInput() {
         val prompt = inputText.trim()
-        if (prompt.isBlank() || activeRunId != null) return
+        if (prompt.isBlank()) return
         submitPrompt(prompt)
+    }
+
+    /** 识别插队指令：以「插队/打断/立即执行」开头时返回去掉指令后的实际任务，否则 null。 */
+    private fun preemptTarget(prompt: String): String? {
+        val trimmed = prompt.trim()
+        for (word in listOf("插队", "打断", "立即执行", "立刻执行")) {
+            if (trimmed.startsWith(word)) {
+                val rest = trimmed.removePrefix(word).trim().trimStart(':', '：', '，', ',', ' ').trim()
+                return rest.takeIf { it.isNotBlank() }
+            }
+        }
+        return null
     }
 
     private fun submitPrompt(prompt: String) {
         val normalized = prompt.trim()
-        if (normalized.isBlank() || activeRunId != null) return
+        if (normalized.isBlank()) return
+        // 任务进行中：识别插队指令；否则默认排队。
+        if (activeRunId != null) {
+            val preempted = preemptTarget(normalized)
+            if (preempted != null) {
+                activeRunId?.let { requestRuntimeCancellation(it) }
+                activeRunId = null
+                pendingPrompts.clear()
+                return submitPrompt(preempted)
+            }
+            pendingPrompts.addLast(normalized)
+            uiState = uiState.copy(
+                messages = uiState.messages + UserMessageUi(
+                    id = "user-queued-${System.nanoTime()}",
+                    content = normalized,
+                    images = emptyList(),
+                ),
+            )
+            return
+        }
         val attachment = screenContextAttachment.takeIf { uiState.screenContext.selected }
         val runImages = attachment?.let { listOf(it.image) }.orEmpty()
         val previewImages = attachment?.let { listOf(it.previewDataUrl) }.orEmpty()
@@ -484,6 +516,14 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                 hiddenForForegroundOperation
             }
             runtimeClient.ackResult(runId)
+            val nextQueued = withContext(Dispatchers.Main.immediate) {
+                if (activeRunId != null) return@withContext null
+                if (pendingPrompts.isNotEmpty()) pendingPrompts.removeFirst() else null
+            }
+            if (nextQueued != null) {
+                mainHandler.post { submitPrompt(nextQueued) }
+                return@launch
+            }
             val resumeVoice = withContext(Dispatchers.Main.immediate) {
                 if (activeRunId != null) return@withContext false
                 voiceSessionMode && !voiceListening
