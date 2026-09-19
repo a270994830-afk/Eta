@@ -767,30 +767,7 @@ internal class AgentLocalTools(
                 message = "点击「$target」未成功；可先 observe_screen 后改用 tap_element",
             )
         }
-        // 验证点击是否生效：若界面无变化，再用带 1px 微动的长触重试一次（部分自定义控件
-        // 用 onTouchEvent 移动阈值过滤纯静止的合成点击）。
-        val beforeSignature = screenContentSignature()
-        SystemClock.sleep(500)
-        val afterSignature = screenContentSignature()
-        if (beforeSignature != afterSignature) return result
-        deviceController.tap(
-            tapPoint.bounds.centerX() + 1,
-            tapPoint.bounds.centerY(),
-            durationMs = 400,
-        )
-        SystemClock.sleep(500)
         return result
-    }
-
-    /** 轻量窗口内容签名：用于判断点击后界面是否变化。 */
-    private fun screenContentSignature(): String {
-        val observation = deviceController.observe(
-            includeScreenshot = false,
-            includeUiTree = true,
-            maxNodes = 60,
-        )
-        val nodes = observation.elementObservation?.nodes ?: return ""
-        return nodes.joinToString("|") { "${it.text}/${it.bounds.left},${it.bounds.top}" }.hashCode().toString()
     }
 
     /** 归一化后按文字匹配节点：完全相等优先，其次包含；每级内可点击的排前面。 */

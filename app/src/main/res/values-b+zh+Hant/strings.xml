@@ -1154,6 +1154,8 @@
   <string name="data_backup_file_open_failed">無法開啟所選檔案</string>
   <string name="hotword_channel_name">語音喚醒</string>
   <string name="hotword_notification_title">Eta 語音喚醒</string>
+  <string name="assistant_result_channel_name">助手結果</string>
+  <string name="assistant_result_notification_title">Eta 助手</string>
   <string name="hotword_notification_text">正在監聽“%1$s”</string>
   <string name="settings_hotword_title">語音喚醒</string>
   <string name="settings_hotword_summary">僅在本機離線喚醒詞時開啟（會常駐麥克風、略增耗電）；使用系統「小愛同學」或電源鍵喚醒時無需開啟。</string>

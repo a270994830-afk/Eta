@@ -2,6 +2,9 @@ package io.github.mangi.eta.agent.voice
 
 import android.app.Service
 import android.app.ActivityOptions
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -22,6 +25,7 @@ import android.view.inputmethod.InputMethodManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.compose.runtime.Composable
+import androidx.core.app.NotificationCompat
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -46,6 +50,7 @@ import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentExternalArchivePayload
 import io.github.mangi.eta.agent.runtime.AgentRuntimeClient
 import io.github.mangi.eta.agent.runtime.AgentRuntimeWire
+import io.github.mangi.eta.R
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.ui.MainActivity
@@ -118,6 +123,7 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
     private var voiceTurnSerial = 0L
     private var pendingInitialQuery: String? = null
     private var speechRecognizer: SpeechRecognizer? = null
+    private var lastResultContent: String = ""
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
     override val savedStateRegistry: SavedStateRegistry
@@ -459,6 +465,7 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                         AgentModelClient.buildUserHistoryMessage(normalized, runImages) + result.transcript
                 }
                 if (result.ok) {
+                    lastResultContent = result.content
                     uiState = uiState.copy(
                         phase = EtaVoicePhase.READY,
                         status = EtaVoiceStatus.Completed,
@@ -490,6 +497,13 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                 }
             } else if (resumeVoice) {
                 scheduleNextVoiceTurn()
+            } else {
+                // 单轮模式：结果完成，前台浮窗收起，结果改为通知后台展示。
+                withContext(Dispatchers.Main.immediate) {
+                    showResultNotificationIfAny()
+                    removeWindow()
+                    stopSelf()
+                }
             }
         }
     }
@@ -933,9 +947,51 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
         speechRecognizer = null
         runCatching { recognizer?.cancel() }
         runCatching { recognizer?.destroy() }
+        showResultNotificationIfAny()
         removeWindow()
         stopSelf()
         resumeHotwordListening()
+    }
+
+    /** 若存在最后一轮结果，发通知后台展示并清空；无结果则不动作。 */
+    private fun showResultNotificationIfAny() {
+        val content = lastResultContent.trim()
+        if (content.isBlank()) return
+        lastResultContent = ""
+        runCatching { showResultNotification(content) }
+    }
+
+    private fun showResultNotification(content: String) {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        manager.createNotificationChannel(
+            NotificationChannel(
+                RESULT_CHANNEL_ID,
+                getString(R.string.assistant_result_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ),
+        )
+        val openIntent = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pending = PendingIntent.getActivity(
+            this,
+            0,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val summary = content
+            .replace(Regex("\n{2,}"), "\n")
+            .trim()
+            .take(500)
+        val notification = NotificationCompat.Builder(this, RESULT_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(getString(R.string.assistant_result_notification_title))
+            .setContentText(summary.take(120).ifBlank { content.take(120) })
+            .setStyle(NotificationCompat.BigTextStyle().bigText(summary))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .build()
+        manager.notify(RESULT_NOTIFICATION_ID, notification)
     }
 
     private fun updateSoftInput(visible: Boolean) {
@@ -1139,6 +1195,8 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
         private const val HANDOFF_EXIT_DURATION_MS = 220L
         private const val HANDOFF_REQUEST_CODE = 0x455441
         private const val VOICE_TURN_GAP_MS = 700L
+        private const val RESULT_CHANNEL_ID = "eta_assistant_result"
+        private const val RESULT_NOTIFICATION_ID = 0xE7A2
         private const val LEGACY_STOPPED_ERROR = "已停止"
         private const val SYNTHETIC_STOPPED = "eta_status:stopped"
         private const val SYNTHETIC_RUNTIME_FAILED = "eta_status:runtime_failed"
