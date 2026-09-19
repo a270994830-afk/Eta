@@ -496,7 +496,17 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                     }
                 }
             } else if (resumeVoice) {
-                scheduleNextVoiceTurn()
+                if (Prefs.isEnabled(Prefs.Keys.ETA_VOICE_CONTINUOUS)) {
+                    scheduleNextVoiceTurn()
+                } else {
+                    // 连续对话已关闭：结果通知后台展示，浮窗收起，交还麦克风。
+                    withContext(Dispatchers.Main.immediate) {
+                        showResultNotificationIfAny()
+                        removeWindow()
+                        stopSelf()
+                        resumeHotwordListening()
+                    }
+                }
             } else {
                 // 单轮模式：结果完成，前台浮窗收起，结果改为通知后台展示。
                 withContext(Dispatchers.Main.immediate) {

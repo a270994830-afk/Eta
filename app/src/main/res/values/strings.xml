@@ -1188,4 +1188,6 @@
   <string name="hotword_notification_text">Listening for “%1$s”</string>
   <string name="settings_hotword_title">Voice wake-up</string>
   <string name="settings_hotword_summary">Enable only for on-device wake word (keeps the microphone on; uses more battery). Not needed when using the system “小爱同学” or the power button.</string>
+  <string name="settings_voice_continuous_title">Continuous conversation</string>
+  <string name="settings_voice_continuous_summary">Keep listening for the next turn after each answer. When off, each answer ends the session immediately.</string>
 </resources>

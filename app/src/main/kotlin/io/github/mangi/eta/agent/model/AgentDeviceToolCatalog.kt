@@ -155,6 +155,16 @@ internal object AgentDeviceToolCatalog {
             )
             .put(
                 function(
+                    "call",
+                    "拨打电话号码：有通话权限时直接拨出，否则打开拨号盘填入号码由用户确认。给联系人打电话时先用 search_contacts 查号码再调用。",
+                    properties(
+                        "number" to string("要拨打的电话号码", 20),
+                    ),
+                    "number",
+                ),
+            )
+            .put(
+                function(
                     "set_volume",
                     "直接设置系统音量，不要操作音量 GUI。",
                     properties(

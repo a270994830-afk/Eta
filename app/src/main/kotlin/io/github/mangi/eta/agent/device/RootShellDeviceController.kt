@@ -1085,10 +1085,10 @@ internal class RootShellDeviceController(
 
     private fun waitForUiSettle(tool: String) {
         val delayMs = when (tool) {
-            "tap", "long_press", "press_key" -> 350L
-            "swipe" -> 650L
-            "input_text" -> 500L
-            else -> 250L
+            "tap", "long_press", "press_key" -> 150L
+            "swipe" -> 350L
+            "input_text" -> 250L
+            else -> 150L
         }
         Thread.sleep(delayMs)
     }

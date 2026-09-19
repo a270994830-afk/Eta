@@ -1701,6 +1701,7 @@ internal class AgentLocalTools(
             "short_video",
             "navigate",
             "flashlight",
+            "call",
         )
         val DEVICE_SENSITIVE_READ_TOOL_NAMES = setOf(
             "get_setting",

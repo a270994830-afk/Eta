@@ -115,6 +115,7 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "stock" -> Icons.AutoMirrored.Rounded.TrendingUp
     "navigate" -> Icons.Rounded.Navigation
     "flashlight" -> Icons.Rounded.FlashlightOn
+    "call" -> Icons.Rounded.Phone
     "send_sms" -> Icons.Rounded.Sms
     "set_brightness" -> Icons.Rounded.Brightness6
     "flow_start_recording", "flow_stop_recording" -> Icons.Rounded.RadioButtonChecked

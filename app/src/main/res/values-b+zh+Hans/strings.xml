@@ -1171,4 +1171,6 @@
   <string name="hotword_notification_text">正在监听“%1$s”</string>
   <string name="settings_hotword_title">语音唤醒</string>
   <string name="settings_hotword_summary">仅在本机离线唤醒词时开启（会常驻麦克风、略增耗电）；使用系统“小爱同学”或电源键唤醒时无需开启。</string>
+  <string name="settings_voice_continuous_title">连续对话</string>
+  <string name="settings_voice_continuous_summary">每次回答后自动继续听下一句；关闭后每句回答完即收起、结果进通知栏。</string>
 </resources>

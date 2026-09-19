@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.SupportAgent
 import androidx.compose.material.icons.rounded.SwipeUp
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.TheaterComedy
 import androidx.compose.material.icons.rounded.TouchApp
@@ -376,6 +377,14 @@ internal fun SettingsScreen(
                         summary = stringResource(R.string.settings_hotword_summary),
                         key = Prefs.Keys.ETA_HOTWORD_ENABLED,
                         icon = Icons.Rounded.Mic,
+                    )
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.settings_voice_continuous_title),
+                        summary = stringResource(R.string.settings_voice_continuous_summary),
+                        key = Prefs.Keys.ETA_VOICE_CONTINUOUS,
+                        icon = Icons.Rounded.Sync,
                     )
                     if (prefs != null || hasConnectedFramework) {
                         WindowSpinnerPreference(

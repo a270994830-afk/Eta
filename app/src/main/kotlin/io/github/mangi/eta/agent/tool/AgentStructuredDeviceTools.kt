@@ -82,6 +82,7 @@ internal class AgentStructuredDeviceTools(
             "set_device_state" -> text(setDeviceState(args))
             "app_state_control" -> text(appStateControl(args))
             "send_sms" -> text(sendSms(args))
+            "call" -> text(call(args))
             "set_brightness" -> text(setBrightness(args))
             else -> null
         }
@@ -571,6 +572,29 @@ internal class AgentStructuredDeviceTools(
         } catch (e: Exception) {
             error("SMS_SEND_FAILED", "短信发送失败: ${e.message}")
         }
+    }
+
+    /** 拨打电话：有 CALL_PHONE 权限时直接拨出，否则打开拨号盘填入号码由用户确认。 */
+    private fun call(args: JSONObject): String {
+        val number = args.optString("number").trim()
+        if (number.isEmpty()) return error("INVALID_ARGUMENT", "缺少电话号码")
+        val granted = context.checkSelfPermission(android.Manifest.permission.CALL_PHONE) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        val intent = if (granted) {
+            Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))
+        } else {
+            Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(number)))
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(intent) }.fold(
+            onSuccess = {
+                ok("call").put("number", number)
+                    .put("direct", granted)
+                    .put("note", if (granted) "已直接拨出" else "无通话权限，已打开拨号盘请用户确认拨打")
+                    .toString()
+            },
+            onFailure = { error("CALL_FAILED", "无法发起通话: ${it.message}") },
+        )
     }
 
     /** 设置屏幕亮度；需要“修改系统设置”特殊权限。 */
