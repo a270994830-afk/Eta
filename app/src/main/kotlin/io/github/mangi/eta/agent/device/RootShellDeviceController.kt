@@ -11,6 +11,8 @@ import android.content.Context
 import android.graphics.Rect
 import android.os.SystemClock
 import java.io.IOException
+import java.io.BufferedReader
+import java.io.OutputStream
 import java.io.StringReader
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -92,6 +94,11 @@ internal class RootShellDeviceController(
         val centerX: Int get() = bounds.centerX()
         val centerY: Int get() = bounds.centerY()
     }
+
+    private val rootShellLock = Any()
+    private var rootShellProcess: Process? = null
+    private var rootShellStdin: OutputStream? = null
+    private var rootShellReader: BufferedReader? = null
 
     fun observe(includeScreenshot: Boolean, includeUiTree: Boolean, maxNodes: Int): Observation {
         val accessibility = AgentAccessibilityService.current()
@@ -1132,8 +1139,70 @@ internal class RootShellDeviceController(
         )
     }
 
+    /** 复用持久 root shell 执行命令；失败/不可用时返回 null，由调用方回退到每次启动 su。 */
+    private fun runPersistent(command: String, timeoutSeconds: Long): ShellTextResult? = synchronized(rootShellLock) {
+        if (!ensureRootShell()) return null
+        val stdinStream = rootShellStdin ?: return null
+        val reader = rootShellReader ?: return null
+        val marker = "ETA_END_${System.nanoTime()}_${kotlin.random.Random.nextInt()}"
+        val script = command.trimEnd('\n') + "\necho \"$marker:$?\"\n"
+        try {
+            stdinStream.write(script.toByteArray(Charsets.UTF_8))
+            stdinStream.flush()
+        } catch (e: Exception) {
+            closeRootShell()
+            return null
+        }
+        val output = StringBuilder()
+        val deadline = System.currentTimeMillis() + timeoutSeconds * 1000
+        while (System.currentTimeMillis() < deadline) {
+            val line = try { reader.readLine() } catch (e: Exception) { null }
+            if (line == null) {
+                closeRootShell()
+                return null
+            }
+            if (line.startsWith(marker)) {
+                val exitCode = line.substringAfter("$marker:").toIntOrNull() ?: 0
+                return ShellTextResult(exitCode, output.toString().trimEnd())
+            }
+            output.append(line).append('\n')
+        }
+        closeRootShell()
+        null
+    }
+
+    private fun ensureRootShell(): Boolean {
+        if (rootShellProcess?.isAlive == true && rootShellStdin != null && rootShellReader != null) return true
+        closeRootShell()
+        return runCatching {
+            val process = ProcessBuilder("su", "-c", "sh").redirectErrorStream(true).start()
+            rootShellProcess = process
+            rootShellStdin = process.outputStream
+            rootShellReader = process.inputStream.bufferedReader(Charsets.UTF_8)
+            true
+        }.getOrElse {
+            closeRootShell()
+            false
+        }
+    }
+
+    private fun closeRootShell() {
+        runCatching { rootShellStdin?.close() }
+        runCatching { rootShellReader?.close() }
+        runCatching { rootShellProcess?.destroy() }
+        rootShellProcess = null
+        rootShellStdin = null
+        rootShellReader = null
+    }
+
+    fun close() {
+        synchronized(rootShellLock) { closeRootShell() }
+    }
+
     private fun runSuText(command: String, timeoutSeconds: Long): ShellTextResult {
         if (!rootAvailable()) return ShellTextResult(-1, "ROOT_REQUIRED")
+        val persistent = runPersistent(command, timeoutSeconds)
+        if (persistent != null) return persistent
         val result = runRootProcess(command, timeoutSeconds)
         val output = listOf(result.output.decodeToString(), result.stderr.decodeToString())
             .filter(String::isNotBlank).joinToString("\n").trim()
