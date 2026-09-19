@@ -1190,4 +1190,18 @@
   <string name="settings_hotword_summary">Enable only for on-device wake word (keeps the microphone on; uses more battery). Not needed when using the system “小爱同学” or the power button.</string>
   <string name="settings_voice_continuous_title">Continuous conversation</string>
   <string name="settings_voice_continuous_summary">Keep listening for the next turn after each answer. When off, each answer ends the session immediately.</string>
+  <string name="settings_reminder_section">Delivery reminders</string>
+  <string name="settings_reminder_kaigong_title">Nightly order-pull reminder</string>
+  <string name="settings_reminder_kaigong_summary">Daily at 19:55: pull next-day orders after 20:00 (say “开工” in Eta).</string>
+  <string name="settings_reminder_window_title">Sell time-window reminder</string>
+  <string name="settings_reminder_window_summary">Daily at 7:55: after 08:00 the usable-batch floor switches to today 15:00 (before: yesterday 15:00).</string>
+  <string name="reminder_channel_name">Delivery reminders</string>
+  <string name="reminder_kaigong_notify_title">Food-chain: time to pull orders</string>
+  <string name="reminder_kaigong_notify_text">Pull next-day orders after 20:00. Open Eta and say “开工”.</string>
+  <string name="reminder_window_notify_title">Sell window switches soon</string>
+  <string name="reminder_window_notify_text">After 08:00 the usable-batch floor = today 15:00 (before that: yesterday 15:00).</string>
+  <string name="shortcut_kaigong_label">Start work</string>
+  <string name="shortcut_kaigong_long">ZSL: start work</string>
+  <string name="shortcut_shougong_label">Wrap up</string>
+  <string name="shortcut_shougong_long">ZSL: wrap up</string>
 </resources>

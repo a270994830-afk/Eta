@@ -24,6 +24,7 @@
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission
@@ -145,6 +146,23 @@
             android:label="@string/voice_interaction_service_label">
             <intent-filter>
                 <action android:name="io.github.mangi.eta.agent.voice.action.SPOKEN_QUERY" />
+            </intent-filter>
+        </receiver>
+
+        <activity
+            android:name=".agent.voice.EtaQuickActionActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <receiver
+            android:name=".agent.reminder.EtaReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="io.github.mangi.eta.agent.reminder.ACTION_KAIGONG" />
+                <action android:name="io.github.mangi.eta.agent.reminder.ACTION_WINDOW" />
             </intent-filter>
         </receiver>
 

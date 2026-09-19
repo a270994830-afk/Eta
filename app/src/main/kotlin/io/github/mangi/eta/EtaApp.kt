@@ -3,10 +3,12 @@ package io.github.mangi.eta
 import android.app.Application
 import android.os.Handler
 import android.os.Looper
+import io.github.mangi.eta.agent.reminder.EtaReminderScheduler
 import io.github.mangi.eta.agent.skill.SkillRuntime
 import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.terminal.TerminalRuntime
 import io.github.mangi.eta.agent.voice.EtaHotwordService
+import io.github.mangi.eta.agent.voice.EtaQuickActionShortcuts
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.core.safeLogType
@@ -61,6 +63,8 @@ class EtaApp : Application(), XposedServiceHelper.OnServiceListener {
         if (Prefs.isEnabled(Prefs.Keys.ETA_HOTWORD_ENABLED)) {
             runCatching { EtaHotwordService.start(this) }
         }
+        runCatching { EtaQuickActionShortcuts.publish(this) }
+        EtaReminderScheduler.sync(this)
         XposedServiceHelper.registerListener(this)
         applicationScope.launch {
             LinuxEnvironmentSettingsRepository.initialize(this@EtaApp)

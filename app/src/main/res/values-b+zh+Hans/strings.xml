@@ -1173,4 +1173,18 @@
   <string name="settings_hotword_summary">仅在本机离线唤醒词时开启（会常驻麦克风、略增耗电）；使用系统“小爱同学”或电源键唤醒时无需开启。</string>
   <string name="settings_voice_continuous_title">连续对话</string>
   <string name="settings_voice_continuous_summary">每次回答后自动继续听下一句；关闭后每句回答完即收起、结果进通知栏。</string>
+  <string name="settings_reminder_section">配送提醒</string>
+  <string name="settings_reminder_kaigong_title">每晚拉单提醒</string>
+  <string name="settings_reminder_kaigong_summary">每天 19:55 提醒：20:00 后拉次日单（在 Eta 里说「开工」）。</string>
+  <string name="settings_reminder_window_title">核销时间窗提醒</string>
+  <string name="settings_reminder_window_summary">每天 7:55 提醒：8 点后可用批次下限变为当天 15:00（之前是头一天 15:00）。</string>
+  <string name="reminder_channel_name">配送提醒</string>
+  <string name="reminder_kaigong_notify_title">浙食链：该拉单了</string>
+  <string name="reminder_kaigong_notify_text">20:00 后拉次日单；点开 Eta 说「开工」。</string>
+  <string name="reminder_window_notify_title">核销时间窗即将切换</string>
+  <string name="reminder_window_notify_text">8 点后可用批次下限 = 当天 15:00；之前 = 头一天 15:00。</string>
+  <string name="shortcut_kaigong_label">开工</string>
+  <string name="shortcut_kaigong_long">浙食链：一键开工</string>
+  <string name="shortcut_shougong_label">收工</string>
+  <string name="shortcut_shougong_long">浙食链：一键收工</string>
 </resources>

@@ -24,9 +24,11 @@ import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Smartphone
@@ -57,6 +59,7 @@ import io.github.mangi.eta.EtaApp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.accessibility.AccessibilityProtectionClient
 import io.github.mangi.eta.agent.accessibility.AgentAccessibilityService
+import io.github.mangi.eta.agent.reminder.EtaReminderScheduler
 import io.github.mangi.eta.agent.voice.EtaHotwordService
 import io.github.mangi.eta.config.PowerAssistantTarget
 import io.github.mangi.eta.config.Prefs
@@ -67,6 +70,7 @@ import io.github.mangi.eta.systemizer.RootManager
 import io.github.mangi.eta.systemizer.SystemizerInstallResult
 import io.github.mangi.eta.ui.app.EnhancementSettingsHistory
 import io.github.mangi.eta.ui.app.rememberDeviceCapabilities
+import io.github.mangi.eta.ui.app.rememberExecutionNotificationRequest
 import io.github.mangi.eta.ui.components.LanguagePreference
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
@@ -158,7 +162,8 @@ internal fun SettingsScreen(
     // LSPosed 数据库）；未就绪时保持 null，UI 禁止修改。
     var prefs by remember { mutableStateOf(Prefs.remotePreferencesForUi(EtaApp.serviceInstance)) }
     val agentPrefs = remember { Prefs.localAgentPreferences() }
-    // 本地开关（不依赖 LSPosed）：切换时启停语音唤醒前台服务。
+    val requestExecutionNotifications = rememberExecutionNotificationRequest()
+    // 本地开关（不依赖 LSPosed）：语音唤醒启停；配送提醒重排闹钟并在开启时请求通知权限。
     DisposableEffect(agentPrefs) {
         val targetPrefs = agentPrefs ?: return@DisposableEffect onDispose {}
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { changedPrefs, key ->
@@ -168,6 +173,12 @@ internal fun SettingsScreen(
                 } else {
                     EtaHotwordService.stop(context.applicationContext)
                 }
+            }
+            if (key == Prefs.Keys.ETA_REMINDER_KAIGONG || key == Prefs.Keys.ETA_REMINDER_WINDOW) {
+                if (changedPrefs.getBoolean(key, false)) {
+                    requestExecutionNotifications()
+                }
+                EtaReminderScheduler.sync(context.applicationContext)
             }
         }
         targetPrefs.registerOnSharedPreferenceChangeListener(listener)
@@ -353,6 +364,29 @@ internal fun SettingsScreen(
                         title = stringResource(R.string.capability_enhancements),
                         startAction = { PreferenceIcon(Icons.Rounded.Security) },
                         onClick = { onNavigate(AppRoute.SystemEnhance) },
+                    )
+                }
+            }
+
+            // ── 配送提醒（浙食链）──────────────────────────────
+            item(key = "zsl_reminders") {
+                SmallTitle(stringResource(R.string.settings_reminder_section))
+                Card(modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.settings_reminder_kaigong_title),
+                        summary = stringResource(R.string.settings_reminder_kaigong_summary),
+                        key = Prefs.Keys.ETA_REMINDER_KAIGONG,
+                        icon = Icons.Rounded.NotificationsActive,
+                    )
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.settings_reminder_window_title),
+                        summary = stringResource(R.string.settings_reminder_window_summary),
+                        key = Prefs.Keys.ETA_REMINDER_WINDOW,
+                        icon = Icons.Rounded.Schedule,
                     )
                 }
             }

@@ -47,6 +47,8 @@ internal object Prefs {
         const val ETA_HOTWORD_ENABLED = "eta_hotword_enabled"
         const val ETA_HOTWORD_KEYWORD = "eta_hotword_keyword"
         const val ETA_VOICE_CONTINUOUS = "eta_voice_continuous"
+        const val ETA_REMINDER_KAIGONG = "eta_reminder_kaigong"
+        const val ETA_REMINDER_WINDOW = "eta_reminder_window"
 
         /** 全部布尔开关及其默认值。 */
         val BOOLEAN_DEFAULTS: Map<String, Boolean> = mapOf(
@@ -67,6 +69,8 @@ internal object Prefs {
             AGENT_THINKING_ENABLED to true,
             ETA_HOTWORD_ENABLED to false,
             ETA_VOICE_CONTINUOUS to false,
+            ETA_REMINDER_KAIGONG to false,
+            ETA_REMINDER_WINDOW to false,
         )
 
         /** 由 Eta Runtime 最终裁决、不要求 Xposed 框架在线的开关。 */
@@ -79,6 +83,8 @@ internal object Prefs {
             AGENT_THINKING_ENABLED,
             ETA_HOTWORD_ENABLED,
             ETA_VOICE_CONTINUOUS,
+            ETA_REMINDER_KAIGONG,
+            ETA_REMINDER_WINDOW,
         )
     }
 

@@ -1159,4 +1159,18 @@
   <string name="hotword_notification_text">正在監聽“%1$s”</string>
   <string name="settings_hotword_title">語音喚醒</string>
   <string name="settings_hotword_summary">僅在本機離線喚醒詞時開啟（會常駐麥克風、略增耗電）；使用系統「小愛同學」或電源鍵喚醒時無需開啟。</string>
+  <string name="settings_reminder_section">配送提醒</string>
+  <string name="settings_reminder_kaigong_title">每晚拉單提醒</string>
+  <string name="settings_reminder_kaigong_summary">每天 19:55 提醒：20:00 後拉次日單（在 Eta 裡說「開工」）。</string>
+  <string name="settings_reminder_window_title">核銷時間窗提醒</string>
+  <string name="settings_reminder_window_summary">每天 7:55 提醒：8 點後可用批次下限變為當天 15:00（之前是頭一天 15:00）。</string>
+  <string name="reminder_channel_name">配送提醒</string>
+  <string name="reminder_kaigong_notify_title">浙食鏈：該拉單了</string>
+  <string name="reminder_kaigong_notify_text">20:00 後拉次日單；點開 Eta 說「開工」。</string>
+  <string name="reminder_window_notify_title">核銷時間窗即將切換</string>
+  <string name="reminder_window_notify_text">8 點後可用批次下限 = 當天 15:00；之前 = 頭一天 15:00。</string>
+  <string name="shortcut_kaigong_label">開工</string>
+  <string name="shortcut_kaigong_long">浙食鏈：一鍵開工</string>
+  <string name="shortcut_shougong_label">收工</string>
+  <string name="shortcut_shougong_long">浙食鏈：一鍵收工</string>
 </resources>
