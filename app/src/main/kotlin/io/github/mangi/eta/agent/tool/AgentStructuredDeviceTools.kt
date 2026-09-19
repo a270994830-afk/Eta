@@ -558,7 +558,11 @@ internal class AgentStructuredDeviceTools(
         if (context.checkSelfPermission(android.Manifest.permission.SEND_SMS) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
-            return error("PERMISSION_REQUIRED", "请在系统设置中授予 Eta 短信权限后重试")
+            return openSettingsAndError(
+                "SMS_PERMISSION_REQUIRED",
+                "需要短信权限才能发送；已打开 Eta 的应用详情页，请授予「短信」权限后重试",
+                "app_details",
+            )
         }
         return try {
             val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -578,25 +582,48 @@ internal class AgentStructuredDeviceTools(
         }
     }
 
-    /** 拨打电话：有 CALL_PHONE 权限时直接拨出，否则打开拨号盘填入号码由用户确认。 */
+    /** 打开对应权限授权页并返回错误；让用户知道为什么失败、去哪里授权。 */
+    private fun openSettingsAndError(code: String, message: String, target: String): String {
+        val intent = when (target) {
+            "write_settings" -> Intent(
+                Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                Uri.parse("package:" + context.packageName),
+            )
+            "notification_listener" -> Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+            else -> Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + context.packageName),
+            )
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+        return error(code, message)
+    }
+
+    /** 拨打电话：有 CALL_PHONE 权限时直接拨出，否则引导用户授权。 */
     private fun call(args: JSONObject): String {
         val number = args.optString("number").trim()
         if (number.isEmpty()) return error("INVALID_ARGUMENT", "缺少电话号码")
         val granted = context.checkSelfPermission(android.Manifest.permission.CALL_PHONE) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
-        val intent = if (granted) {
-            Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))
-        } else {
-            Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(number)))
+        if (!granted) {
+            runCatching {
+                context.startActivity(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + context.packageName),
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            return error(
+                "CALL_PERMISSION_REQUIRED",
+                "需要电话权限才能直接拨出；已打开 Eta 的应用详情页，请授予「电话」权限后再说一次",
+            )
         }
+        val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching { context.startActivity(intent) }.fold(
-            onSuccess = {
-                ok("call").put("number", number)
-                    .put("direct", granted)
-                    .put("note", if (granted) "已直接拨出" else "无通话权限，已打开拨号盘请用户确认拨打")
-                    .toString()
-            },
+            onSuccess = { ok("call").put("number", number).put("direct", true).put("note", "已直接拨出").toString() },
             onFailure = { error("CALL_FAILED", "无法发起通话: ${it.message}") },
         )
     }
@@ -607,7 +634,11 @@ internal class AgentStructuredDeviceTools(
         val reply = args.optString("reply").trim()
         if (reply.isEmpty()) return error("INVALID_ARGUMENT", "缺少回复内容")
         if (!AgentNotificationHistoryService.isEnabled(context)) {
-            return error("NOTIFICATION_ACCESS_REQUIRED", "请先在系统设置中授予 Eta 通知使用权")
+            return openSettingsAndError(
+                "NOTIFICATION_ACCESS_REQUIRED",
+                "需要通知使用权才能直达回复；已打开通知访问设置，请允许 Eta 后重试",
+                "notification_listener",
+            )
         }
         val notifications = AgentNotificationHistoryService.currentNotifications()
             ?: return error("NO_NOTIFICATIONS", "无法读取当前通知，请确认通知使用权已开启")
@@ -650,7 +681,11 @@ internal class AgentStructuredDeviceTools(
         val level = args.optInt("level", -1)
         if (level !in 0..100) return error("INVALID_ARGUMENT", "level 必须在 0 到 100 之间")
         if (!android.provider.Settings.System.canWrite(context)) {
-            return error("PERMISSION_REQUIRED", "请在系统设置中允许 Eta 修改系统设置后重试")
+            return openSettingsAndError(
+                "WRITE_SETTINGS_REQUIRED",
+                "需要「修改系统设置」权限才能调亮度；已打开授权页，请允许后重试",
+                "write_settings",
+            )
         }
         return try {
             android.provider.Settings.System.putInt(
@@ -946,7 +981,11 @@ internal class AgentStructuredDeviceTools(
 
     private fun listenerNotifications(packageFilter: String, limit: Int): String {
         if (!AgentNotificationHistoryService.isEnabled(context)) {
-            return error("NOTIFICATION_ACCESS_REQUIRED", "请先在权限健康页授予 Eta 通知使用权")
+            return openSettingsAndError(
+                "NOTIFICATION_ACCESS_REQUIRED",
+                "需要通知使用权才能读取通知；已打开通知访问设置，请允许 Eta 后重试",
+                "notification_listener",
+            )
         }
         val notifications = AgentNotificationHistoryService.currentNotifications()
             ?: return error("NOTIFICATION_LISTENER_UNAVAILABLE", "通知服务尚未连接，请稍后重试")

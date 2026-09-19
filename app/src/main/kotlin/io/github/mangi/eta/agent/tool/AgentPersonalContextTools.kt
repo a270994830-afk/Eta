@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.hardware.display.DisplayManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -110,15 +112,27 @@ internal class AgentPersonalContextTools(private val context: Context) {
             .put("accuracy_m", result.accuracyMeters)
             .put("age_ms", result.ageMillis)
             .toString()
-        is DeviceLocationProvider.Result.Unavailable -> error(
-            "LOCATION_UNAVAILABLE",
-            when (result.status) {
-                "permission_required" -> "请先授予位置权限"
-                "background_permission_required" -> "请将位置权限设为始终允许"
-                "location_disabled" -> "系统定位服务已关闭"
-                else -> "系统没有可用的最近位置"
-            },
-        )
+        is DeviceLocationProvider.Result.Unavailable -> {
+            if (result.status == "permission_required" || result.status == "background_permission_required") {
+                runCatching {
+                    context.startActivity(
+                        Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:" + context.packageName),
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            }
+            error(
+                "LOCATION_UNAVAILABLE",
+                when (result.status) {
+                    "permission_required" -> "需要位置权限；已打开 Eta 应用详情页，请授予「位置信息」权限后重试"
+                    "background_permission_required" -> "需要位置权限设为「始终允许」；已打开 Eta 应用详情页"
+                    "location_disabled" -> "系统定位服务已关闭，请开启定位后重试"
+                    else -> "系统没有可用的最近位置"
+                },
+            )
+        }
     }
 
     private fun deviceEnvironment(): String {
