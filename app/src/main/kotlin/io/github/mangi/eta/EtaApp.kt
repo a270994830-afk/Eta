@@ -3,6 +3,7 @@ package io.github.mangi.eta
 import android.app.Application
 import android.os.Handler
 import android.os.Looper
+import io.github.mangi.eta.agent.reminder.DeliveryToolboxBootstrap
 import io.github.mangi.eta.agent.reminder.EtaReminderScheduler
 import io.github.mangi.eta.agent.skill.SkillRuntime
 import io.github.mangi.eta.agent.device.RootAccess
@@ -68,6 +69,7 @@ class EtaApp : Application(), XposedServiceHelper.OnServiceListener {
         XposedServiceHelper.registerListener(this)
         applicationScope.launch {
             LinuxEnvironmentSettingsRepository.initialize(this@EtaApp)
+            runCatching { DeliveryToolboxBootstrap.ensure(this@EtaApp) }
             runCatching {
                 SkillRuntime.createIndexService(this@EtaApp).listInstalledSkills()
             }.onFailure { throwable ->
