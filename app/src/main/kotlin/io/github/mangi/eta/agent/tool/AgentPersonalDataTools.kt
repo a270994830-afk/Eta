@@ -5,11 +5,16 @@ import io.github.mangi.eta.agent.media.MAX_AGENT_IMAGE_BYTES
 import io.github.mangi.eta.agent.model.AgentModelClient
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.util.Locale
 
 /**
- * 个人数据读取只绑定已验证的系统或厂商 Provider，绝不向模型开放 URI、表名或 SQL。
+ * 个人数据访问只绑定已验证的系统或厂商 Provider，绝不向模型开放 URI、表名或 SQL。
  * Root 用于调用受签名权限保护的 Provider；查询条件始终由固定列和受控关键词组成。
+ * 日历在只读检索之外支持结构化参数的新建写入（create_calendar_event）。
  */
 internal class AgentPersonalDataTools(
     private val root: BoundedRootCommandExecutor,
@@ -21,6 +26,7 @@ internal class AgentPersonalDataTools(
             "search_recordings" -> searchAudio(args, recordingsOnly = true)
             "search_files" -> searchFiles(args)
             "search_calendar_events" -> searchCalendarEvents(args)
+            "create_calendar_event" -> createCalendarEvent(args)
             "search_contacts" -> searchContacts(args)
             "search_call_history" -> searchCallHistory(args)
             "search_messages" -> searchMessages(args)
@@ -78,6 +84,115 @@ internal class AgentPersonalDataTools(
         fixedWhere = "deleted=0",
         args = args,
     )
+
+    private fun createCalendarEvent(args: JSONObject): AgentModelClient.ToolResult {
+        val title = args.optString("title").trim()
+        if (title.isEmpty() || title.length > MAX_CALENDAR_TITLE_LENGTH) {
+            return sensitive(error("INVALID_ARGUMENT", "日程标题不能为空，且不超过 $MAX_CALENDAR_TITLE_LENGTH 字"))
+        }
+        val allDay = args.optBoolean("all_day", false)
+        val start = parseDeviceTime(args.optString("start"))
+            ?: return sensitive(error("INVALID_ARGUMENT", "start 需要 yyyy-MM-dd HH:mm、yyyy-MM-dd 或带时区的 ISO 8601 时间"))
+        val endText = args.optString("end").trim()
+        val end = if (endText.isNotEmpty()) {
+            val parsed = parseDeviceTime(endText)
+                ?: return sensitive(error("INVALID_ARGUMENT", "end 时间格式与 start 相同"))
+            if (allDay) parsed + ONE_DAY_MS else parsed
+        } else {
+            val minutes = args.optLong("duration_minutes", DEFAULT_EVENT_DURATION_MINUTES)
+                .coerceIn(1L, MAX_EVENT_DURATION_MINUTES)
+            start + (if (allDay) ONE_DAY_MS else minutes * ONE_MINUTE_MS)
+        }
+        if (end <= start) {
+            return sensitive(error("INVALID_ARGUMENT", "结束时间必须晚于开始时间"))
+        }
+        val calendar = resolveDefaultCalendar()
+            ?: return sensitive(error("CALENDAR_UNAVAILABLE", "未找到可写入的系统日历"))
+        val location = args.optString("location").trim()
+        val description = args.optString("description").trim()
+        val reminderMinutes = args.optInt("reminder_minutes", 0).coerceIn(0, MAX_EVENT_REMINDER_MINUTES)
+        val insertCommand = buildString {
+            append("content insert --uri ").append(shellQuote(CALENDAR_EVENTS_URI))
+            append(" --bind ").append(shellQuote("calendar_id:i:${calendar.id}"))
+            append(" --bind ").append(shellQuote("title:s:$title"))
+            append(" --bind ").append(shellQuote("dtstart:l:$start"))
+            append(" --bind ").append(shellQuote("dtend:l:$end"))
+            append(" --bind ").append(shellQuote("eventTimezone:s:${ZoneId.systemDefault().id}"))
+            append(" --bind ").append(shellQuote("allDay:i:${if (allDay) 1 else 0}"))
+            append(" --bind ").append(shellQuote("hasAlarm:i:${if (reminderMinutes > 0) 1 else 0}"))
+            if (location.isNotEmpty()) append(" --bind ").append(shellQuote("eventLocation:s:$location"))
+            if (description.isNotEmpty()) append(" --bind ").append(shellQuote("description:s:$description"))
+        }
+        val insertResult = root.execute(insertCommand, timeoutMillis = QUERY_TIMEOUT_MS, maxOutputBytes = 8 * 1024)
+        if (!insertResult.ok || PersonalDataContentParser.hasProviderFailure(insertResult.stdout, insertResult.stderr)) {
+            return sensitive(error(rootErrorCode(insertResult), "写入系统日历失败"))
+        }
+        val eventId = findCalendarEventId(calendar.id, start, title)
+        val reminderApplied = eventId != null && reminderMinutes > 0 && applyCalendarReminder(eventId, reminderMinutes)
+        return sensitive(
+            JSONObject()
+                .put("ok", true)
+                .put("tool", "create_calendar_event")
+                .put("calendar", calendar.displayName)
+                .put("event_id", eventId ?: JSONObject.NULL)
+                .put("title", title)
+                .put("start_epoch_ms", start)
+                .put("end_epoch_ms", end)
+                .put("all_day", allDay)
+                .put("reminder_minutes", if (reminderApplied) reminderMinutes else 0)
+                .toString(),
+        )
+    }
+
+    private data class CalendarTarget(val id: Long, val displayName: String)
+
+    private fun resolveDefaultCalendar(): CalendarTarget? {
+        val columns = listOf("_id", "calendar_displayName", "calendar_access_level", "visible", "isPrimary")
+        val command = "content query --uri " + shellQuote(CALENDAR_CALENDARS_URI) +
+            " --projection " + shellQuote(columns.joinToString(":"))
+        val result = root.execute(command, timeoutMillis = QUERY_TIMEOUT_MS, maxOutputBytes = MAX_OUTPUT_BYTES)
+        if (!result.ok || PersonalDataContentParser.hasProviderFailure(result.stdout, result.stderr)) return null
+        val writable = PersonalDataContentParser.parseRows(result.stdout, columns).filter { row ->
+            (row.optString("calendar_access_level").toIntOrNull() ?: 0) >= CALENDAR_ACCESS_CONTRIBUTOR
+        }
+        val target = writable.firstOrNull { it.optString("isPrimary") == "1" && it.optString("visible") == "1" }
+            ?: writable.firstOrNull { it.optString("visible") == "1" }
+            ?: writable.firstOrNull()
+            ?: return null
+        val id = target.optString("_id").toLongOrNull() ?: return null
+        return CalendarTarget(id, target.optString("calendar_displayName").ifBlank { "默认日历" })
+    }
+
+    private fun findCalendarEventId(calendarId: Long, startMillis: Long, title: String): Long? {
+        val columns = listOf("_id", "title", "dtstart")
+        val where = "calendar_id=$calendarId AND dtstart=$startMillis AND deleted=0"
+        val command = "content query --uri " + shellQuote(CALENDAR_EVENTS_URI) +
+            " --projection " + shellQuote(columns.joinToString(":")) +
+            " --where " + shellQuote(where) +
+            " --sort " + shellQuote("_id DESC")
+        val result = root.execute(command, timeoutMillis = QUERY_TIMEOUT_MS, maxOutputBytes = MAX_OUTPUT_BYTES)
+        if (!result.ok) return null
+        val rows = PersonalDataContentParser.parseRows(result.stdout, columns)
+        val row = rows.firstOrNull { it.optString("title") == title } ?: rows.firstOrNull() ?: return null
+        return row.optString("_id").toLongOrNull()
+    }
+
+    private fun applyCalendarReminder(eventId: Long, minutes: Int): Boolean {
+        val command = "content insert --uri " + shellQuote(CALENDAR_REMINDERS_URI) +
+            " --bind " + shellQuote("event_id:i:$eventId") +
+            " --bind " + shellQuote("minutes:i:$minutes") +
+            " --bind " + shellQuote("method:i:1")
+        return root.execute(command, timeoutMillis = QUERY_TIMEOUT_MS, maxOutputBytes = 8 * 1024).ok
+    }
+
+    private fun parseDeviceTime(raw: String): Long? {
+        val text = raw.trim().takeIf { it.isNotEmpty() } ?: return null
+        val normalized = text.replace(' ', 'T')
+        runCatching { return OffsetDateTime.parse(normalized).toInstant().toEpochMilli() }
+        runCatching { return LocalDateTime.parse(normalized).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() }
+        runCatching { return LocalDate.parse(text).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() }
+        return null
+    }
 
     private fun searchContacts(args: JSONObject): AgentModelClient.ToolResult = query(
         tool = "search_contacts",
@@ -306,6 +421,16 @@ internal class AgentPersonalDataTools(
         const val MAX_LIMIT = 30
         const val QUERY_TIMEOUT_MS = 15_000L
         const val MAX_OUTPUT_BYTES = 512 * 1024
+        const val CALENDAR_EVENTS_URI = "content://com.android.calendar/events"
+        const val CALENDAR_CALENDARS_URI = "content://com.android.calendar/calendars"
+        const val CALENDAR_REMINDERS_URI = "content://com.android.calendar/reminders"
+        const val CALENDAR_ACCESS_CONTRIBUTOR = 500
+        const val MAX_CALENDAR_TITLE_LENGTH = 200
+        const val DEFAULT_EVENT_DURATION_MINUTES = 60L
+        const val MAX_EVENT_DURATION_MINUTES = 43_200L
+        const val MAX_EVENT_REMINDER_MINUTES = 40_320
+        const val ONE_MINUTE_MS = 60_000L
+        const val ONE_DAY_MS = 86_400_000L
         const val QQ_CHAT_IMAGES_DIRECTORY = "/storage/emulated/0/Android/data/com.tencent.mobileqq/Tencent/MobileQQ/chatpic"
         const val WECHAT_CHAT_IMAGES_DIRECTORY = "/storage/emulated/0/Android/data/com.tencent.mm/MicroMsg"
         const val CHAT_IMAGE_CANDIDATE_LIMIT = 120

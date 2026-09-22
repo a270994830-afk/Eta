@@ -416,6 +416,7 @@
   <string name="tool_memory_get">读取记忆</string>
   <string name="tool_memory_write">整理记忆</string>
   <string name="tool_set_alarm">设置闹钟</string>
+  <string name="tool_create_calendar_event">新建日程</string>
   <string name="tool_set_timer">设置计时器</string>
   <string name="tool_device_status">设备状态</string>
   <string name="tool_network_info">网络状态</string>
@@ -739,6 +740,8 @@
   <string name="tool_ui_play_pause_and_switch_songs_without_operating_th_311cb8">播放、暂停、切歌，不操作界面</string>
   <string name="tool_ui_organize_memory_2b08eb">整理记忆</string>
   <string name="tool_ui_calendar_events_970349">日历事件</string>
+  <string name="tool_ui_create_calendar_event">新建日程</string>
+  <string name="tool_ui_create_calendar_event_summary">在系统日历中新建日程，可带时间、地点与提醒</string>
   <string name="tool_ui_time_and_location_693893">时间与位置</string>
   <string name="tool_ui_replacement_text_1a5c8d">替换文本</string>
   <string name="tool_ui_replace_text_in_focus_or_node_30d332">替换焦点或节点中的文本</string>

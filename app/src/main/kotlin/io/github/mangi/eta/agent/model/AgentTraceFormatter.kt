@@ -589,6 +589,7 @@ internal class AgentTraceFormatter {
             "search_recordings" to "搜索录音",
             "search_files" to "搜索文件",
             "search_calendar_events" to "搜索日程",
+            "create_calendar_event" to "新建日程",
             "search_contacts" to "搜索联系人",
             "search_call_history" to "搜索通话记录",
             "search_messages" to "搜索短信",

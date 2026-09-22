@@ -435,6 +435,7 @@
   <string name="tool_memory_get">Read memory</string>
   <string name="tool_memory_write">Update memory</string>
   <string name="tool_set_alarm">Set alarm</string>
+  <string name="tool_create_calendar_event">New calendar event</string>
   <string name="tool_set_timer">Set timer</string>
   <string name="tool_device_status">Device status</string>
   <string name="tool_network_info">Network status</string>
@@ -747,6 +748,8 @@
   <string name="tool_ui_play_pause_and_switch_songs_without_operating_th_311cb8">Play, pause, and switch songs without operating the interface</string>
   <string name="tool_ui_organize_memory_2b08eb">organize memory</string>
   <string name="tool_ui_calendar_events_970349">Calendar events</string>
+  <string name="tool_ui_create_calendar_event">New calendar event</string>
+  <string name="tool_ui_create_calendar_event_summary">Create events in the system calendar with time, location and reminders</string>
   <string name="tool_ui_time_and_location_693893">time and location</string>
   <string name="tool_ui_replacement_text_1a5c8d">replacement text</string>
   <string name="tool_ui_replace_text_in_focus_or_node_30d332">Replace text in focus or node</string>

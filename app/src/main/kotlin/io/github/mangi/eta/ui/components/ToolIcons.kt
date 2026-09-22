@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.ContentPasteGo
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.EditCalendar
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.FindReplace
@@ -133,6 +134,7 @@ internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "get_health_summary" -> Icons.Rounded.MonitorHeart
     "recent_app_activity", "app_usage_summary" -> Icons.Rounded.Insights
     "search_calendar_events" -> Icons.Rounded.CalendarMonth
+    "create_calendar_event", "新建日程" -> Icons.Rounded.EditCalendar
     "search_contacts" -> Icons.Rounded.Contacts
     "search_call_history" -> Icons.Rounded.Phone
     "search_messages" -> Icons.Rounded.ChatBubble

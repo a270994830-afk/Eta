@@ -1748,6 +1748,7 @@ internal class AgentLocalTools(
             "set_setting",
             "set_device_state",
             "app_state_control",
+            "create_calendar_event",
             "send_sms",
             "set_brightness",
             "reply_notification",

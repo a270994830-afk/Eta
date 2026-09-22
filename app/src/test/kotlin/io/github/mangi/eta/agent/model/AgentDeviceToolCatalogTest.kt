@@ -39,6 +39,9 @@ class AgentDeviceToolCatalogTest {
         assertFalse("send_message" in reads)
         assertFalse("send_message" in actions)
         assertTrue("app_state_control" in actions)
+        assertFalse("create_calendar_event" in reads)
+        assertFalse("create_calendar_event" in direct)
+        assertTrue("create_calendar_event" in actions)
     }
 
     private fun names(

@@ -404,6 +404,7 @@
   <string name="tool_memory_get">讀取記憶</string>
   <string name="tool_memory_write">整理記憶</string>
   <string name="tool_set_alarm">設定鬧鐘</string>
+  <string name="tool_create_calendar_event">新增日曆事件</string>
   <string name="tool_set_timer">設定計時器</string>
   <string name="tool_device_status">裝置狀態</string>
   <string name="tool_network_info">網路狀態</string>
@@ -727,6 +728,8 @@
   <string name="tool_ui_play_pause_and_switch_songs_without_operating_th_311cb8">播放、暫停、切歌，不操作介面</string>
   <string name="tool_ui_organize_memory_2b08eb">整理記憶</string>
   <string name="tool_ui_calendar_events_970349">日曆事件</string>
+  <string name="tool_ui_create_calendar_event">新增日曆事件</string>
+  <string name="tool_ui_create_calendar_event_summary">在系統日曆中新增日程，可附時間、地點與提醒</string>
   <string name="tool_ui_time_and_location_693893">時間與位置</string>
   <string name="tool_ui_replacement_text_1a5c8d">替換文字</string>
   <string name="tool_ui_replace_text_in_focus_or_node_30d332">替換焦點或節點中的文本</string>

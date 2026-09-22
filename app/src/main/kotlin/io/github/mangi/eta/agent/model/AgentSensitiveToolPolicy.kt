@@ -40,6 +40,7 @@ internal object AgentSensitiveToolPolicy {
         "read_image",
         "get_clipboard",
         "set_setting",
+        "create_calendar_event",
         "memory_get",
         "memory_write",
         "character_memory_get",

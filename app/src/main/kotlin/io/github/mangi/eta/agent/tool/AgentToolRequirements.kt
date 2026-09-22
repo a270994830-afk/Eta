@@ -54,7 +54,7 @@ internal object AgentToolRequirements {
         register(
             RootRequirement.REQUIRED,
             "top_memory_apps", "top_storage_apps", "wifi_credentials", "read_sms_code",
-            "get_logcat", "set_setting", "set_device_state", "app_state_control",
+            "get_logcat", "set_setting", "set_device_state", "app_state_control", "create_calendar_event",
             "list_alarms", "list_active_timers", "get_health_summary", "search_clipboard_history",
             "search_media", "search_audio", "search_recordings", "search_files",
             "search_calendar_events", "search_contacts", "search_call_history", "search_messages",
