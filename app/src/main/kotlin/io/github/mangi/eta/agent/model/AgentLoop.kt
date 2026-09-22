@@ -354,7 +354,7 @@ internal class AgentLoop(
         discardPendingToolImageMessage()
         val images = imageOutcomes.flatMap { outcome -> outcome.result.images }
         val toolNames = imageOutcomes
-            .map { outcome -> outcome.call.name }
+            .map { outcome -> imageOutcomeLabel(outcome) }
             .distinct()
             .joinToString(", ")
         pendingToolImageMessage = AgentConversationCodec.userMessage(
@@ -383,6 +383,16 @@ internal class AgentLoop(
                 return
             }
         }
+    }
+
+    private fun imageOutcomeLabel(outcome: ToolOutcome): String {
+        val paths = runCatching { JSONObject(outcome.result.content).optJSONArray("paths") }.getOrNull()
+            ?: return outcome.call.name
+        if (paths.length() == 0) return outcome.call.name
+        val labels = (0 until paths.length()).joinToString(", ") { index ->
+            "图${index + 1}=${paths.optString(index)}"
+        }
+        return "${outcome.call.name} ($labels)"
     }
 
     private fun ProviderEvent.toAgentEvent(round: Int): AgentEvent? =

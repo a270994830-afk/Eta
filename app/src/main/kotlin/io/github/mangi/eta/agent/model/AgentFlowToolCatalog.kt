@@ -76,7 +76,7 @@ internal object AgentFlowToolCatalog {
                                     "steps",
                                     JSONObject()
                                         .put("type", "array")
-                                        .put("description", "新的步骤数组，每项为 {\"action\":\"tap_text\",\"args\":{\"text\":\"按钮文字\"}} 形式；支持 action：launch_app/open_uri/tap_text/tap_xy/input_text/replace_text/clear_text/swipe/scroll/press_key/wait_text/wait_package。")
+                                        .put("description", "新的步骤数组，每项为 {\"action\":\"tap_text\",\"args\":{\"text\":\"按钮文字\"}} 形式；支持 action：launch_app/open_uri/tap_text/tap_xy/input_text/replace_text/clear_text/swipe/scroll/press_key/wait_text/wait_package；与工具同名的 tap、wait_for_text、wait_for_package 会自动映射到对应动作。")
                                         .put("items", JSONObject().put("type", "object"))
                                 )
                         )

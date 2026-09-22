@@ -145,8 +145,12 @@ internal object AgentToolRequirements {
                     remove("default")
                 }
             }
-            "read_image" -> properties?.getJSONObject("path")?.put("description",
-                "当前应用有权读取的绝对图片路径、file URI 或已授权的 content URI。")
+            "read_image" -> {
+                properties?.getJSONObject("path")?.put("description",
+                    "当前应用有权读取的绝对图片路径、file URI 或已授权的 content URI。")
+                properties?.optJSONObject("paths")?.put("description",
+                    "当前应用有权读取的绝对图片路径、file URI 或已授权的 content URI；最多 3 张。")
+            }
             "press_key" -> properties?.getJSONObject("button")?.let { button ->
                 val values = button.getJSONArray("enum")
                 button.put("enum", JSONArray().also { allowed ->

@@ -132,8 +132,8 @@ internal object AgentPromptBuilder {
                         "守护任务不随 run 或会话结束回收，也不要用 nohup 或 & 手工后台化；" +
                         "async 后台命令是独立 shell，不要和 session_id 混用。不要调用 search_apps 查询“终端”或“Termux”。" +
                         "Eta 已内置终端，不要回答‘没有终端应用’或要求另装终端 App。" +
-                        "读取图片内容必须调用 read_image。同一轮模型回复最多调用一次 read_image；需要查看多张图片时，" +
-                        "必须等待当前图片返回并观察内容，再在下一轮调用下一张，禁止在同一轮并行或批量调用多个 read_image。"
+                        "读取图片内容必须调用 read_image。单张用 path；需要同时查看或对比多张时，在一次调用里用 paths 传全部路径（最多 3 张，按顺序标注为图1、图2、图3）；" +
+                        "同一轮模型回复最多调用一次 read_image；要读取更多图片时，必须等待当前结果返回并观察内容，再在下一轮调用下一张，禁止在同一轮并行调用多个 read_image。"
                 )
             )
         }

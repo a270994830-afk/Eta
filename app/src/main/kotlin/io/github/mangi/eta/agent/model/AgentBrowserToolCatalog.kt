@@ -99,7 +99,7 @@ internal object AgentBrowserToolCatalog {
                                     .put("description", "get_readable 或 get_text 最多返回的文本字符数。")
                             )
                             .put(
-                                "read_image",
+                                "include_screenshot",
                                 JSONObject()
                                     .put("type", "boolean")
                                     .put("description", "screenshot 时是否把截图附给模型直接查看，默认 true。")

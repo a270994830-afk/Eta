@@ -675,7 +675,7 @@ internal class AgentLocalTools(
         }
         val newSteps = (0 until stepsJson.length()).mapNotNull { i ->
             val obj = stepsJson.optJSONObject(i) ?: return@mapNotNull null
-            val action = obj.optString("action").trim()
+            val action = canonicalFlowAction(obj.optString("action").trim())
             if (action.isEmpty()) return@mapNotNull null
             AgentFlowStore.FlowStep(action, obj.optJSONObject("args") ?: JSONObject())
         }.filter { step ->
@@ -699,6 +699,13 @@ internal class AgentLocalTools(
             .put("steps", updated.steps.size)
             .put("message", "流程已更新，下次回放将使用修正后的步骤")
             .toString()
+    }
+
+    private fun canonicalFlowAction(action: String): String = when (action) {
+        "tap" -> "tap_xy"
+        "wait_for_text" -> "wait_text"
+        "wait_for_package" -> "wait_package"
+        else -> action
     }
 
     private fun executeFlowStep(action: String, stepArgs: JSONObject): String = when (action) {

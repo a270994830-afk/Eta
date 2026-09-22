@@ -11,54 +11,92 @@ import io.github.mangi.eta.agent.model.AgentModelClient
 import java.io.File
 import java.io.IOException
 import java.io.InterruptedIOException
+import org.json.JSONArray
 import org.json.JSONObject
 
-/** 读取用户已明确指定的单张图片，并以临时视觉附件交给当前模型回合。 */
+/** 读取用户已明确指定的图片（单张或多张，最多 3 张），并以临时视觉附件交给当前模型回合。 */
 internal class AgentImageTools(
     private val context: Context,
     private val root: BoundedRootCommandExecutor,
     private val rootAvailable: () -> Boolean = { RootAccess.isGranted },
 ) {
     fun readImage(args: JSONObject): AgentModelClient.ToolResult {
-        val source = args.getString("path").removePrefix("file://")
+        val requested = requestedPaths(args)
+        if (requested.isEmpty()) {
+            return sensitive(error("IMAGE_PATH_REQUIRED", "请提供 path（单张）或 paths（最多 $MAX_IMAGES_PER_CALL 张）"))
+        }
+        if (requested.size > MAX_IMAGES_PER_CALL) {
+            return sensitive(error("IMAGE_TOO_MANY", "一次最多读取 $MAX_IMAGES_PER_CALL 张图片"))
+        }
+        val images = mutableListOf<AgentModelClient.ModelImage>()
+        val succeeded = mutableListOf<String>()
+        val failures = mutableListOf<ImageFailure>()
+        for (source in requested) {
+            when (val read = readSingleImage(source)) {
+                is SingleImageRead.Success -> {
+                    images += read.image
+                    succeeded += source
+                }
+                is SingleImageRead.Failure -> failures += ImageFailure(source, read.code, read.message)
+            }
+        }
+        if (images.isEmpty()) {
+            val first = failures.first()
+            return sensitive(error(first.code, first.message))
+        }
+        val content = JSONObject()
+            .put("ok", true)
+            .put("tool", "read_image")
+            .put("image_attached", true)
+            .put("paths", JSONArray(succeeded))
+        if (failures.isNotEmpty()) {
+            content.put("errors", JSONArray(failures.map { failure -> failure.toJson() }))
+        }
+        return sensitive(content = content.toString(), images = images)
+    }
+
+    private fun requestedPaths(args: JSONObject): List<String> {
+        val result = LinkedHashSet<String>()
+        args.optString("path").trim().takeIf { it.isNotEmpty() }?.let(result::add)
+        val paths = args.optJSONArray("paths") ?: return result.toList()
+        for (index in 0 until paths.length()) {
+            paths.optString(index).trim().takeIf { it.isNotEmpty() }?.let(result::add)
+        }
+        return result.toList()
+    }
+
+    private fun readSingleImage(rawSource: String): SingleImageRead {
+        val source = rawSource.removePrefix("file://")
         val sourceKind = when {
             source.startsWith("content://") -> ImageSourceKind.ContentUri
             source.startsWith("/") && !source.contains('\u0000') -> ImageSourceKind.File
-            else -> return sensitive(error("IMAGE_PATH_DENIED", "图片路径必须是绝对路径、file URI 或已授权的 content URI"))
+            else -> return SingleImageRead.Failure("IMAGE_PATH_DENIED", "图片路径必须是绝对路径、file URI 或已授权的 content URI")
         }
         val temporaryFile = runCatching {
             File.createTempFile("eta-read-image-", ".img", imageCacheDirectory())
         }.getOrElse {
-            return sensitive(error("IMAGE_TEMPORARY_FILE_FAILED", "无法创建图片临时文件"))
+            return SingleImageRead.Failure("IMAGE_TEMPORARY_FILE_FAILED", "无法创建图片临时文件")
         }
         return try {
             val staged = copyAsApp(source, sourceKind, temporaryFile)
             if (!staged) {
                 if (!rootAvailable()) {
-                    return sensitive(error("IMAGE_ACCESS_DENIED", "Eta 无法读取此图片；请先通过文件选择器导入或授予读取权限"))
+                    return SingleImageRead.Failure("IMAGE_ACCESS_DENIED", "Eta 无法读取此图片；请先通过文件选择器导入或授予读取权限")
                 }
                 val copyResult = root.execute(
                     imageCopyCommand(source, sourceKind, temporaryFile),
                     timeoutMillis = READ_TIMEOUT_MS,
                     maxOutputBytes = 8 * 1024,
                 )
-                if (!copyResult.ok) return sensitive(copyFailure(copyResult))
+                if (!copyResult.ok) return copyFailure(copyResult)
             }
             val image = AgentImageCodec.fromToolFile(
                 file = temporaryFile,
                 source = "tool_read_image",
-            ) ?: return sensitive(error("IMAGE_UNSUPPORTED", "文件不是可识别的图片"))
-            sensitive(
-                content = JSONObject()
-                    .put("ok", true)
-                    .put("tool", "read_image")
-                    .put("path", source)
-                    .put("image_attached", true)
-                    .toString(),
-                images = listOf(image),
-            )
+            ) ?: return SingleImageRead.Failure("IMAGE_UNSUPPORTED", "文件不是可识别的图片")
+            SingleImageRead.Success(image)
         } catch (_: BoundedFileCopy.TooLargeException) {
-            sensitive(error("IMAGE_TOO_LARGE", "图片超过大小限制"))
+            SingleImageRead.Failure("IMAGE_TOO_LARGE", "图片超过大小限制")
         } finally {
             temporaryFile.delete()
         }
@@ -107,11 +145,11 @@ internal class AgentImageTools(
             ?.takeIf { it.isDirectory || it.mkdirs() }
             ?: context.cacheDir
 
-    private fun copyFailure(result: BoundedRootCommandExecutor.Result): String = when (result.exitCode) {
-        21 -> error("IMAGE_SOURCE_UNAVAILABLE", "图片源文件不存在或当前不可读")
-        22 -> error("IMAGE_TOO_LARGE", "图片超过大小限制")
-        23 -> error("IMAGE_STAGE_FAILED", "Root 无法将图片复制到 Eta 临时缓存")
-        else -> error("IMAGE_UNAVAILABLE", "图片读取失败")
+    private fun copyFailure(result: BoundedRootCommandExecutor.Result): SingleImageRead.Failure = when (result.exitCode) {
+        21 -> SingleImageRead.Failure("IMAGE_SOURCE_UNAVAILABLE", "图片源文件不存在或当前不可读")
+        22 -> SingleImageRead.Failure("IMAGE_TOO_LARGE", "图片超过大小限制")
+        23 -> SingleImageRead.Failure("IMAGE_STAGE_FAILED", "Root 无法将图片复制到 Eta 临时缓存")
+        else -> SingleImageRead.Failure("IMAGE_UNAVAILABLE", "图片读取失败")
     }
 
     private fun error(code: String, message: String): String =
@@ -124,6 +162,18 @@ internal class AgentImageTools(
 
     private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
+    private data class ImageFailure(val source: String, val code: String, val message: String) {
+        fun toJson(): JSONObject = JSONObject()
+            .put("path", source)
+            .put("code", code)
+            .put("message", message)
+    }
+
+    private sealed interface SingleImageRead {
+        data class Success(val image: AgentModelClient.ModelImage) : SingleImageRead
+        data class Failure(val code: String, val message: String) : SingleImageRead
+    }
+
     private enum class ImageSourceKind {
         File,
         ContentUri,
@@ -131,6 +181,7 @@ internal class AgentImageTools(
 
     private companion object {
         const val READ_TIMEOUT_MS = 15_000L
+        const val MAX_IMAGES_PER_CALL = 3
         const val MAX_IMAGE_FILE_BYTES = MAX_AGENT_IMAGE_BYTES.toLong()
     }
 }

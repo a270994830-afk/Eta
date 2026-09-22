@@ -522,7 +522,7 @@ internal object AgentBrowserSession {
     private fun screenshot(args: JSONObject): BrowserToolResult {
         val view = requirePage()
         val captured = captureViewport(view)
-        val includeImage = args.optBoolean("read_image", true)
+        val includeImage = args.optBoolean("include_screenshot", true)
         val envelope = baseEnvelope("screenshot", true, "ok")
             .put("image_width", captured.width)
             .put("image_height", captured.height)
