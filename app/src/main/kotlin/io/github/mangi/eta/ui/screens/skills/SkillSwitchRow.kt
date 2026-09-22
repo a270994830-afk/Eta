@@ -22,14 +22,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.ui.components.EtaPreference
+import io.github.mangi.eta.ui.components.EtaPreferenceColors
+import io.github.mangi.eta.ui.components.EtaPreferenceIcon
+import io.github.mangi.eta.ui.components.EtaSwitch
 import io.github.mangi.eta.ui.components.ItemDescriptionDialog
-import io.github.mangi.eta.ui.components.PreferenceIcon
 import io.github.mangi.eta.ui.model.SkillItemUi
-import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -43,8 +44,8 @@ internal fun SkillSwitchRow(
 ) {
     var showDescription by remember(skill.id) { mutableStateOf(false) }
     val description = skill.description.ifBlank { stringResource(R.string.skills_no_description) }
-    BasicComponent(
-        startAction = { PreferenceIcon(iconForSkill(skill.id), enabled = enabled) },
+    EtaPreference(
+        startAction = { EtaPreferenceIcon(iconForSkill(skill.id), enabled = enabled, tint = EtaPreferenceColors.Green) },
         endActions = {
             OverlayIconDropdownMenu(
                 modifier = Modifier.align(Alignment.CenterVertically),
@@ -72,7 +73,7 @@ internal fun SkillSwitchRow(
                 )
             }
             Spacer(modifier = Modifier.width(4.dp))
-            Switch(
+            EtaSwitch(
                 checked = skill.enabled,
                 onCheckedChange = onToggle,
                 enabled = enabled,
@@ -82,7 +83,7 @@ internal fun SkillSwitchRow(
     ) {
         Text(
             text = skill.name,
-            style = MiuixTheme.textStyles.headline1,
+            style = MiuixTheme.textStyles.body1,
             fontWeight = FontWeight.Medium,
             color = if (enabled) MiuixTheme.colorScheme.onBackground else MiuixTheme.colorScheme.disabledOnSurface,
         )

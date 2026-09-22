@@ -61,6 +61,7 @@ import io.github.mangi.eta.agent.terminal.isLinux
 import io.github.mangi.eta.ui.app.TerminalBlockUi
 import io.github.mangi.eta.ui.app.UserTerminalStore
 import io.github.mangi.eta.ui.app.UserTerminalUiState
+import io.github.mangi.eta.ui.components.EtaTextButton
 import io.github.mangi.eta.ui.components.ansiPlainText
 import io.github.mangi.eta.ui.components.ansiToAnnotatedString
 import top.yukonga.miuix.kmp.basic.DropdownImpl
@@ -70,7 +71,6 @@ import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowListPopup
@@ -450,7 +450,7 @@ private fun StatusBar(
             }
         }
         if (state.running) {
-            TextButton(
+            EtaTextButton(
                 text = stringResource(R.string.terminal_stop),
                 onClick = onStop,
             )
@@ -534,7 +534,7 @@ private fun LinuxGuide(onOpenEnvironment: () -> Unit) {
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             textAlign = TextAlign.Center,
         )
-        TextButton(
+        EtaTextButton(
             text = stringResource(R.string.terminal_open_environment),
             onClick = onOpenEnvironment,
             modifier = Modifier.padding(top = 12.dp),

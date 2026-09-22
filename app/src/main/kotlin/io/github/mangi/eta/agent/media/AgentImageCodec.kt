@@ -35,12 +35,14 @@ internal object AgentImageCodec {
         )
     }
 
-    /** 用户附件始终保持原始字节、编码和像素尺寸。 */
+    /** 用户附件统一编码为模型兼容的 JPEG，并保持原始像素尺寸。 */
     fun fromAttachmentBytes(
         bytes: ByteArray,
         source: String,
         mimeHint: String = "image/jpeg",
-    ): AgentModelClient.ModelImage = fromBytes(bytes, source, mimeHint)
+    ): AgentModelClient.ModelImage =
+        AgentModelImageEncoder.screen(bytes, source, mimeHint)
+            ?: error("无法解码图片")
 
     /** Root screencap 只允许无损换编码，不改变截图尺寸。 */
     fun fromScreenBytes(
@@ -96,12 +98,9 @@ internal object AgentImageCodec {
             if (encoded.isBlank() || encoded.length > MAX_AGENT_IMAGE_BYTES * 2) return null
             val bytes = runCatching { Base64.decode(encoded, Base64.DEFAULT).size }.getOrDefault(0)
             if (bytes <= 0 || bytes > MAX_AGENT_IMAGE_BYTES) return null
-            return AgentModelClient.ModelImage(
-                reference = trimmed,
-                mimeType = trimmed.substring("data:".length).substringBefore(";"),
-                bytes = bytes,
-                source = source
-            )
+            val raw = runCatching { Base64.decode(encoded, Base64.DEFAULT) }.getOrNull() ?: return null
+            return AgentModelImageEncoder.screen(raw, source, trimmed.substring("data:".length).substringBefore(";"))
+                ?: return null
         }
 
         if (context != null) {

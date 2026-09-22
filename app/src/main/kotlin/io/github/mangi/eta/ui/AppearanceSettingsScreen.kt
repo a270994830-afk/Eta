@@ -32,22 +32,24 @@ import io.github.mangi.eta.data.model.MIN_INTERFACE_SCALE
 import io.github.mangi.eta.data.model.normalizeInterfaceScale
 import io.github.mangi.eta.data.repository.AppearanceSettingsRepository
 import io.github.mangi.eta.ui.app.LocalAppearanceSettings
+import io.github.mangi.eta.ui.components.EtaArrowPreference
+import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaOverlayDropdownPreference
+import io.github.mangi.eta.ui.components.EtaPreferenceDivider
+import io.github.mangi.eta.ui.components.EtaPreferenceGroup
+import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
+import io.github.mangi.eta.ui.components.EtaSwitchPreference
+import io.github.mangi.eta.ui.components.EtaWindowDialog
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SliderDefaults
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
-import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
-import kotlin.math.roundToInt
 
 @Composable
 internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
@@ -117,11 +119,11 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
         onBack = onBack,
     ) {
         item(key = "appearance_color_title") {
-            SmallTitle(text = stringResource(R.string.appearance_group_color))
+            EtaPreferenceGroupTitle(text = stringResource(R.string.appearance_group_color))
         }
         item(key = "appearance_color_card") {
-            Card(modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
-                OverlayDropdownPreference(
+            EtaPreferenceGroup(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
+                EtaOverlayDropdownPreference(
                     title = stringResource(R.string.appearance_theme_mode),
                     summary = themeModeLabels[appearance.themeMode.ordinal],
                     items = themeModeLabels,
@@ -132,7 +134,8 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
                         }
                     },
                 )
-                SwitchPreference(
+                EtaPreferenceDivider(hasLeading = false)
+                EtaSwitchPreference(
                     title = stringResource(R.string.appearance_monet),
                     summary = stringResource(R.string.appearance_monet_summary),
                     checked = appearance.monetEnabled,
@@ -146,7 +149,8 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
                     exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
                 ) {
                     Column {
-                        OverlayDropdownPreference(
+                        EtaPreferenceDivider(hasLeading = false)
+                        EtaOverlayDropdownPreference(
                             title = stringResource(R.string.appearance_palette_style),
                             summary = paletteLabels[appearance.paletteStyle.ordinal],
                             items = paletteLabels,
@@ -157,7 +161,8 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
                                 }
                             },
                         )
-                        OverlayDropdownPreference(
+                        EtaPreferenceDivider(hasLeading = false)
+                        EtaOverlayDropdownPreference(
                             title = stringResource(R.string.appearance_accent_color),
                             summary = accentLabels[appearance.accentColor.ordinal],
                             items = accentLabels,
@@ -168,7 +173,8 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
                                 }
                             },
                         )
-                        SwitchPreference(
+                        EtaPreferenceDivider(hasLeading = false)
+                        EtaSwitchPreference(
                             title = stringResource(R.string.appearance_pure_black),
                             summary = stringResource(R.string.appearance_pure_black_summary),
                             checked = appearance.pureBlackEnabled,
@@ -182,11 +188,11 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
         }
 
         item(key = "appearance_interface_title") {
-            SmallTitle(text = stringResource(R.string.appearance_group_interface))
+            EtaPreferenceGroupTitle(text = stringResource(R.string.appearance_group_interface))
         }
         item(key = "appearance_interface_card") {
-            Card(modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
-                SwitchPreference(
+            EtaPreferenceGroup(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
+                EtaSwitchPreference(
                     title = stringResource(R.string.appearance_blur),
                     summary = stringResource(R.string.appearance_blur_summary),
                     checked = appearance.blurEnabled && blurSupported,
@@ -200,7 +206,8 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
                     enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
                     exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
                 ) {
-                    OverlayDropdownPreference(
+                    EtaPreferenceDivider(hasLeading = false)
+                    EtaOverlayDropdownPreference(
                         title = stringResource(R.string.appearance_blur_style),
                         summary = blurStyleSummaries[appearance.topBarBlurStyle.ordinal],
                         items = blurStyleLabels,
@@ -212,7 +219,8 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
                         },
                     )
                 }
-                SwitchPreference(
+                EtaPreferenceDivider(hasLeading = false)
+                EtaSwitchPreference(
                     title = stringResource(R.string.appearance_swipe_dismiss),
                     summary = stringResource(R.string.appearance_swipe_dismiss_summary),
                     checked = appearance.swipeDismissEnabled,
@@ -220,7 +228,8 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
                         update { current -> current.copy(swipeDismissEnabled = enabled) }
                     },
                 )
-                SwitchPreference(
+                EtaPreferenceDivider(hasLeading = false)
+                EtaSwitchPreference(
                     title = stringResource(R.string.appearance_predictive_back),
                     summary = stringResource(R.string.appearance_predictive_back_summary),
                     checked = appearance.predictiveBackEnabled,
@@ -228,7 +237,8 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
                         update { current -> current.copy(predictiveBackEnabled = enabled) }
                     },
                 )
-                ArrowPreference(
+                EtaPreferenceDivider(hasLeading = false)
+                EtaArrowPreference(
                     title = stringResource(R.string.appearance_interface_scale),
                     summary = stringResource(R.string.appearance_interface_scale_summary),
                     endActions = {
@@ -265,7 +275,7 @@ internal fun AppearanceSettingsScreen(onBack: () -> Unit) {
     }
 
     val parsedScale = scaleInput.toIntOrNull()
-    WindowDialog(
+    EtaWindowDialog(
         show = showScaleDialog,
         title = stringResource(R.string.appearance_interface_scale_dialog_title),
         summary = stringResource(R.string.appearance_interface_scale_dialog_summary),

@@ -21,8 +21,7 @@ internal const val MAX_AGENT_IMAGE_BYTES = 12 * 1024 * 1024
 
 /** 仅负责为工具截图和聊天预览生成独立的图片副本。 */
 internal object AgentModelImageEncoder {
-    // WebP 无损模式的 quality 表示编码努力，不会丢失像素信息。
-    private const val SCREEN_WEBP_EFFORT = 75
+    private const val MODEL_JPEG_QUALITY = 95
     private const val PREVIEW_JPEG_QUALITY = 80
 
     private data class EncodingProfile(
@@ -42,9 +41,9 @@ internal object AgentModelImageEncoder {
     private data class TargetSize(val width: Int, val height: Int)
 
     private val screenProfile = EncodingProfile(
-        format = Bitmap.CompressFormat.WEBP_LOSSLESS,
-        mimeType = "image/webp",
-        quality = SCREEN_WEBP_EFFORT,
+        format = Bitmap.CompressFormat.JPEG,
+        mimeType = "image/jpeg",
+        quality = MODEL_JPEG_QUALITY,
     )
     private val previewProfile = EncodingProfile(
         maxLongEdge = 512,
@@ -54,11 +53,9 @@ internal object AgentModelImageEncoder {
         quality = PREVIEW_JPEG_QUALITY,
     )
     private val toolVisionProfile = EncodingProfile(
-        maxLongEdge = 1_600,
-        maxPixels = 1_500_000L,
         format = Bitmap.CompressFormat.JPEG,
         mimeType = "image/jpeg",
-        quality = 82,
+        quality = MODEL_JPEG_QUALITY,
     )
 
     fun screen(
@@ -67,14 +64,15 @@ internal object AgentModelImageEncoder {
         mimeHint: String,
     ): AgentModelClient.ModelImage? {
         if (!bytes.hasSupportedImageMagic()) return null
+        val bounds = inspectBounds(bytes, mimeHint)
         val encoded = transcodeBytes(
             bytes = bytes,
             source = source,
-            bounds = inspectBounds(bytes, mimeHint),
+            bounds = bounds,
             profile = screenProfile,
         )
-        // Root screencap 已经是压缩图片；只在无损 WebP 确实更小时替换它。
-        return encoded?.takeIf { it.bytes < bytes.size }
+        // 所有模型输入统一使用 JPEG，避免不同服务商对 HEIF、WebP 等格式支持不一致。
+        return encoded
     }
 
     fun screen(
@@ -88,9 +86,10 @@ internal object AgentModelImageEncoder {
         bitmap: Bitmap,
         source: String,
     ): AgentModelClient.ModelImage =
-        encodeBitmap(bitmap, source, toolVisionProfile, flattenAlpha = true)
+        // GUI Agent 依赖截图像素与设备坐标一一对应，禁止缩放；仅统一编码为 JPEG。
+        encodeBitmap(bitmap, source, screenProfile, flattenAlpha = true)
 
-    /** 文件工具图片仅在发送模型前缩放压缩，保持多图请求的体积可控。 */
+    /** 文件工具图片在发送模型前统一编码为 JPEG。 */
     fun toolVision(
         bytes: ByteArray,
         source: String,

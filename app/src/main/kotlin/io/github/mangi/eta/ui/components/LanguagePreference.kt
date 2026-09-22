@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -17,10 +18,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.mangi.eta.R
 import io.github.mangi.eta.data.repository.LanguageSettingsRepository
-import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
+import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun LanguagePreference() {
+internal fun LanguagePreference(iconTint: Color = MiuixTheme.colorScheme.onBackground) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val repository = remember(context.applicationContext) {
@@ -47,11 +49,12 @@ internal fun LanguagePreference() {
         locales.indexOfFirst { LocaleList.matchesLanguageAndScript(it, selected) } + 1
     } ?: 0
 
-    OverlayDropdownPreference(
+    EtaDropdownPreference(
         title = stringResource(R.string.settings_language),
-        items = labels,
+        items = labels.map { DropdownItem(text = it) },
+        useWindow = false,
         selectedIndex = selectedIndex,
-        startAction = { PreferenceIcon(icon = Icons.Rounded.Language) },
+        startAction = { EtaPreferenceIcon(icon = Icons.Rounded.Language, tint = iconTint) },
         onSelectedIndexChange = { index ->
             if (index in labels.indices) {
                 repository.selectLocale(if (index == 0) null else locales[index - 1])

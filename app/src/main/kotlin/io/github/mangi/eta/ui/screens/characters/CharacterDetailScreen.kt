@@ -24,20 +24,22 @@ import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.agent.roleplay.CharacterCardFormat
 import io.github.mangi.eta.agent.roleplay.RoleplayBinding
 import io.github.mangi.eta.ui.app.CharacterLibraryStore
+import io.github.mangi.eta.ui.components.EtaArrowPreference
+import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaPreferenceDivider
+import io.github.mangi.eta.ui.components.EtaPreferenceGroup
+import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
+import io.github.mangi.eta.ui.components.EtaRadioButtonPreference
+import io.github.mangi.eta.ui.components.EtaSwitchPreference
+import io.github.mangi.eta.ui.components.EtaTextButton
+import io.github.mangi.eta.ui.components.EtaWindowDialog
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
 import io.github.mangi.eta.ui.navigation.AppRoute
 import top.yukonga.miuix.kmp.basic.BasicComponentColors
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.RadioButtonPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 private const val DescriptionPreviewChars = 220
 private const val GreetingPreviewChars = 240
@@ -68,8 +70,8 @@ internal fun CharacterDetailScreen(
             return@MiuixScaffoldPage
         }
         item(key = "profile") {
-            Card(
-                modifier = Modifier.padding(horizontal = CharacterCardPadding, vertical = 6.dp),
+            EtaCard(
+                modifier = Modifier.padding(horizontal = CharacterCardPadding, vertical = 8.dp),
                 insideMargin = PaddingValues(16.dp),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -108,7 +110,7 @@ internal fun CharacterDetailScreen(
             }
         }
         item(key = "start") {
-            TextButton(
+            EtaTextButton(
                 text = "开始新对话",
                 enabled = !store.busy,
                 onClick = { store.startConversation(id, onStart) },
@@ -119,24 +121,26 @@ internal fun CharacterDetailScreen(
             )
         }
         item(key = "persona") {
-            Card(
-                modifier = Modifier.padding(horizontal = CharacterCardPadding, vertical = 6.dp),
+            EtaPreferenceGroup(
+                modifier = Modifier.padding(horizontal = CharacterCardPadding, vertical = 8.dp),
             ) {
-                SwitchPreference(
+                EtaSwitchPreference(
                     title = "使用我的人设",
                     summary = store.persona.name.ifBlank { "未设置称呼" },
                     checked = store.usePersona,
                     onCheckedChange = { store.usePersona = it },
                 )
-                ArrowPreference(title = "编辑我的人设", onClick = { onNavigate(AppRoute.CharacterPersona) })
+                EtaPreferenceDivider(hasLeading = false)
+                EtaArrowPreference(title = "编辑我的人设", onClick = { onNavigate(AppRoute.CharacterPersona) })
             }
         }
-        item(key = "greetings-title") { SmallTitle("开场白") }
+        item(key = "greetings-title") { EtaPreferenceGroupTitle("开场白") }
         item(key = "greetings") {
-            Card(modifier = Modifier.padding(horizontal = CharacterCardPadding)) {
+            EtaPreferenceGroup(modifier = Modifier.padding(horizontal = CharacterCardPadding)) {
                 val greetings = listOf(profile.card.firstMessage) + profile.card.alternateGreetings
                 greetings.forEachIndexed { index, greeting ->
-                    RadioButtonPreference(
+                    if (index > 0) EtaPreferenceDivider(hasLeading = false)
+                    EtaRadioButtonPreference(
                         title = if (index == 0) "默认开场白" else "开场白 ${index + 1}",
                         summary = greeting.take(GreetingPreviewChars)
                             .let { if (greeting.length > GreetingPreviewChars) "$it…" else it }
@@ -166,20 +170,23 @@ internal fun CharacterDetailScreen(
                 }
             }
         }
-        item(key = "management-title") { SmallTitle("管理") }
+        item(key = "management-title") { EtaPreferenceGroupTitle("管理") }
         item(key = "management") {
-            Card(modifier = Modifier.padding(horizontal = CharacterCardPadding)) {
-                ArrowPreference(title = "编辑角色", enabled = !store.busy, onClick = {
+            EtaPreferenceGroup(modifier = Modifier.padding(horizontal = CharacterCardPadding)) {
+                EtaArrowPreference(title = "编辑角色", enabled = !store.busy, onClick = {
                     store.discardEditor()
                     onNavigate(AppRoute.CharacterEditor(id))
                 })
-                ArrowPreference(title = "剧情记忆", summary = "此角色各次对话共享的故事与关系记录", onClick = {
+                EtaPreferenceDivider(hasLeading = false)
+                EtaArrowPreference(title = "剧情记忆", summary = "此角色各次对话共享的故事与关系记录", onClick = {
                     onNavigate(AppRoute.CharacterMemory(id))
                 })
-                ArrowPreference(title = "复制角色", enabled = !store.busy, onClick = {
+                EtaPreferenceDivider(hasLeading = false)
+                EtaArrowPreference(title = "复制角色", enabled = !store.busy, onClick = {
                     store.duplicate(id) { onNavigate(AppRoute.CharacterDetail(it)) }
                 })
-                ArrowPreference(
+                EtaPreferenceDivider(hasLeading = false)
+                EtaArrowPreference(
                     title = "删除角色",
                     titleColor = BasicComponentColors(
                         color = MiuixTheme.colorScheme.error,
@@ -194,13 +201,13 @@ internal fun CharacterDetailScreen(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    TextButton(
+                    EtaTextButton(
                         text = "导出 PNG",
                         onClick = { pngExporter.launch(characterExportName(profile.card.name, "png")) },
                         enabled = !store.busy,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(
+                    EtaTextButton(
                         text = "导出 JSON",
                         onClick = { jsonExporter.launch(characterExportName(profile.card.name, "json")) },
                         enabled = !store.busy,
@@ -211,12 +218,12 @@ internal fun CharacterDetailScreen(
         }
         if (store.compatibilityWarnings.isNotEmpty()) {
             item(key = "compatibility") {
-                Card(
+                EtaPreferenceGroup(
                     modifier = Modifier
                         .padding(horizontal = CharacterCardPadding)
                         .padding(top = 12.dp),
                 ) {
-                    ArrowPreference(
+                    EtaArrowPreference(
                         title = "兼容说明",
                         summary = "${store.compatibilityWarnings.size} 项内容按兼容范围处理",
                         onClick = { showCompatibility = !showCompatibility },
@@ -237,7 +244,7 @@ internal fun CharacterDetailScreen(
     }
 
     if (showDeleteConfirm && profile != null) {
-        WindowDialog(
+        EtaWindowDialog(
             show = true,
             title = "删除角色",
             summary = "「${profile.card.name}」将从角色库移除，角色图片与剧情记忆一并删除；已有对话保留。此操作无法撤销。",
@@ -257,7 +264,7 @@ internal fun CharacterDetailScreen(
     }
 
     preview?.let { current ->
-        WindowDialog(
+        EtaWindowDialog(
             show = true,
             title = current.title,
             onDismissRequest = { preview = null },
@@ -269,7 +276,7 @@ internal fun CharacterDetailScreen(
             ) {
                 Text(current.text, style = MiuixTheme.textStyles.body2)
             }
-            TextButton(
+            EtaTextButton(
                 text = "关闭",
                 onClick = { preview = null },
                 modifier = Modifier

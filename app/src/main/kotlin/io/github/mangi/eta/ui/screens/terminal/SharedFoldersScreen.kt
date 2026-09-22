@@ -42,18 +42,20 @@ import io.github.mangi.eta.agent.terminal.TerminalEnvironment
 import io.github.mangi.eta.agent.terminal.TerminalRuntime
 import io.github.mangi.eta.agent.terminal.runOneShotShell
 import io.github.mangi.eta.agent.terminal.shellQuote
+import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaPreference
+import io.github.mangi.eta.ui.components.EtaPreferenceDivider
+import io.github.mangi.eta.ui.components.EtaPreferenceGroup
+import io.github.mangi.eta.ui.components.EtaTextButton
+import io.github.mangi.eta.ui.components.EtaWindowDialog
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
  * 共享文件夹管理：把 Android 目录配置为 Linux 环境 /workspace/mounts/ 下的挂载点。
@@ -106,20 +108,21 @@ internal fun SharedFoldersScreen(
         onBack = onBack,
     ) {
         item(key = "mounts-card") {
-            Card(
+            EtaPreferenceGroup(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .padding(bottom = 12.dp),
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 16.dp),
             ) {
                 if (mounts.isEmpty()) {
-                    BasicComponent(
+                    EtaPreference(
                         title = stringResource(R.string.shared_folders_empty),
                         summary = stringResource(R.string.shared_folders_entry_summary),
                     )
                 }
                 mounts.forEach { mount ->
                     val missing = sourceExists[mount.sourcePath] == false
-                    BasicComponent(
+                    EtaPreferenceDivider(hasLeading = false)
+                    EtaPreference(
                         title = mount.name,
                         summary = buildString {
                             append(mount.sourcePath)
@@ -136,14 +139,15 @@ internal fun SharedFoldersScreen(
                             }
                         },
                         endActions = {
-                            TextButton(
+                            EtaTextButton(
                                 text = stringResource(R.string.action_delete),
                                 onClick = { removeTarget = mount },
                             )
                         },
                     )
                 }
-                BasicComponent(
+                EtaPreferenceDivider(hasLeading = false)
+                EtaPreference(
                     title = stringResource(R.string.shared_folders_add),
                     onClick = {
                         if (TerminalRuntime.rootAvailable || Environment.isExternalStorageManager()) {
@@ -172,12 +176,12 @@ internal fun SharedFoldersScreen(
         }
         notice?.let { message ->
             item(key = "notice-card") {
-                Card(
+                EtaPreferenceGroup(
                     modifier = Modifier
-                        .padding(horizontal = 12.dp)
+                        .padding(horizontal = 16.dp)
                         .padding(top = 12.dp),
                 ) {
-                    BasicComponent(title = message)
+                    EtaPreference(title = message)
                 }
             }
         }
@@ -204,7 +208,7 @@ internal fun SharedFoldersScreen(
     }
 
     removeTarget?.let { target ->
-        WindowDialog(
+        EtaWindowDialog(
             show = true,
             title = stringResource(R.string.shared_folders_remove_title),
             summary = stringResource(R.string.shared_folders_remove_message, target.name, target.sourcePath),
@@ -315,7 +319,7 @@ private fun SharedFolderPickerDialog(
         }
     }
 
-    WindowDialog(
+    EtaWindowDialog(
         show = true,
         title = stringResource(R.string.shared_folders_picker_title),
         onDismissRequest = onDismiss,

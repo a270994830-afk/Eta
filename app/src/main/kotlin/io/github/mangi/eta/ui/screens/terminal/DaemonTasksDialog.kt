@@ -1,7 +1,4 @@
 package io.github.mangi.eta.ui.screens.terminal
-import io.github.mangi.eta.R
-import androidx.compose.ui.res.stringResource
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,18 +18,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.terminal.TerminalEnvironment
 import io.github.mangi.eta.ui.app.DaemonTaskUi
+import io.github.mangi.eta.ui.components.EtaTextButton
+import io.github.mangi.eta.ui.components.EtaWindowDialog
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 /** 守护任务列表面板；终端块视图与控制台视图共用。 */
 @Composable
@@ -42,7 +41,7 @@ internal fun DaemonTasksDialog(
     onStop: (String) -> Unit,
     onLoadLogs: suspend (String) -> String,
 ) {
-    WindowDialog(
+    EtaWindowDialog(
         show = true,
         title = stringResource(R.string.terminal_daemon_tasks),
         onDismissRequest = onDismiss,
@@ -101,7 +100,7 @@ private fun DaemonTaskRow(
                 },
                 modifier = Modifier.weight(1f),
             )
-            TextButton(
+            EtaTextButton(
                 text = stringResource(
                     if (logsExpanded) R.string.terminal_daemon_hide_logs else R.string.terminal_daemon_view_logs
                 ),
@@ -112,7 +111,7 @@ private fun DaemonTaskRow(
                     }
                 },
             )
-            TextButton(
+            EtaTextButton(
                 text = stringResource(R.string.terminal_stop),
                 onClick = { onStop(task.id) },
             )

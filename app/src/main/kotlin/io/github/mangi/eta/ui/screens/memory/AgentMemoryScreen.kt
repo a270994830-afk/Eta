@@ -1,6 +1,4 @@
 package io.github.mangi.eta.ui.screens.memory
-import io.github.mangi.eta.R
-import androidx.compose.ui.res.stringResource
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,26 +20,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import io.github.mangi.eta.R
+import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaPreference
+import io.github.mangi.eta.ui.components.EtaPreferenceDivider
+import io.github.mangi.eta.ui.components.EtaPreferenceGroup
+import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
+import io.github.mangi.eta.ui.components.EtaSwitchPreference
+import io.github.mangi.eta.ui.components.EtaTextButton
+import io.github.mangi.eta.ui.components.EtaWindowDialog
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffold
 import io.github.mangi.eta.ui.layout.horizontalCutoutPadding
 import io.github.mangi.eta.ui.model.AgentMemoryAction
 import io.github.mangi.eta.ui.model.AgentMemoryUiState
-import top.yukonga.miuix.kmp.basic.BasicComponent
+import java.text.NumberFormat
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import top.yukonga.miuix.kmp.window.WindowDialog
-import java.text.NumberFormat
 
 @Composable
 internal fun AgentMemoryScreen(
@@ -74,21 +76,22 @@ internal fun AgentMemoryScreen(
                 ),
                 overscrollEffect = null,
             ) {
-                item(key = "status-title") { SmallTitle(stringResource(R.string.ui_memory_b55ff5)) }
+                item(key = "status-title") { EtaPreferenceGroupTitle(stringResource(R.string.ui_memory_b55ff5)) }
                 item(key = "status-card") {
-                    Card(
+                    EtaPreferenceGroup(
                         modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .padding(bottom = 12.dp),
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 16.dp),
                     ) {
-                        SwitchPreference(
+                        EtaSwitchPreference(
                             title = stringResource(R.string.ui_enable_memory_4b69b7),
                             summary = stringResource(R.string.ui_after_closing_no_memory_will_be_injected_and_the_mod_db3d23),
                             checked = state.enabled,
                             enabled = !state.isLoading,
                             onCheckedChange = { onAction(AgentMemoryAction.ToggleEnabled(it)) },
                         )
-                        BasicComponent(
+                        EtaPreferenceDivider(hasLeading = false)
+                        EtaPreference(
                             title = stringResource(R.string.ui_core_memory_injection_budget_48b5d5),
                             summary = stringResource(R.string.memory_budget_summary, formatNumber(state.coreBudgetChars)),
                         )
@@ -102,11 +105,11 @@ internal fun AgentMemoryScreen(
                     .imePadding()
                     .navigationBarsPadding(),
             ) {
-                SmallTitle("MEMORY.md")
-                Card(
+                EtaPreferenceGroupTitle("MEMORY.md")
+                EtaCard(
                     modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp),
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 16.dp),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         TextField(
@@ -155,13 +158,13 @@ internal fun AgentMemoryScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            TextButton(
+                            EtaTextButton(
                                 text = stringResource(R.string.ui_clear_84fcd7),
                                 enabled = !state.isLoading && !state.isSaving && state.draft.isNotEmpty(),
                                 onClick = { showClearDialog = true },
                                 modifier = Modifier.weight(1f),
                             )
-                            TextButton(
+                            EtaTextButton(
                                 text = if (state.isSaving) stringResource(R.string.memory_saving) else stringResource(R.string.memory_save),
                                 enabled = state.canSave,
                                 onClick = { onAction(AgentMemoryAction.Save) },
@@ -176,7 +179,7 @@ internal fun AgentMemoryScreen(
     }
 
     if (showClearDialog) {
-        WindowDialog(
+        EtaWindowDialog(
             show = true,
             title = stringResource(R.string.ui_clear_all_memory_a43bd3),
             summary = stringResource(R.string.ui_the_entire_contents_of_memory_md_will_be_deleted_and_83a8ac),
@@ -196,13 +199,13 @@ internal fun AgentMemoryScreen(
     }
 
     state.notice?.let { notice ->
-        WindowDialog(
+        EtaWindowDialog(
             show = true,
             title = stringResource(R.string.ui_memory_b55ff5),
             summary = notice,
             onDismissRequest = { onAction(AgentMemoryAction.DismissNotice) },
         ) {
-            TextButton(
+            EtaTextButton(
                 text = stringResource(R.string.ui_knew_cb63c6),
                 onClick = { onAction(AgentMemoryAction.DismissNotice) },
                 modifier = Modifier.fillMaxWidth(),

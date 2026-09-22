@@ -18,24 +18,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaPreference
+import io.github.mangi.eta.ui.components.EtaPreferenceColors
+import io.github.mangi.eta.ui.components.EtaPreferenceDivider
+import io.github.mangi.eta.ui.components.EtaPreferenceGroup
+import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
+import io.github.mangi.eta.ui.components.EtaPreferenceIcon
+import io.github.mangi.eta.ui.components.EtaTextButton
+import io.github.mangi.eta.ui.components.EtaWindowDialog
 import io.github.mangi.eta.ui.components.ListEmptyState
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
-import io.github.mangi.eta.ui.components.PreferenceIcon
 import io.github.mangi.eta.ui.model.AgentSkillsAction
 import io.github.mangi.eta.ui.model.AgentSkillsUiState
 import io.github.mangi.eta.ui.model.SkillItemUi
 import io.github.mangi.eta.ui.model.canDeleteUserSkill
-import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
-import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.window.WindowDialog
 
-private val CardHorizontalPadding = 12.dp
-private val CardBottomPadding = 12.dp
+private val CardHorizontalPadding = 16.dp
+private val CardBottomPadding = 16.dp
 
 @Composable
 fun AgentSkillsScreen(
@@ -70,14 +73,14 @@ fun AgentSkillsScreen(
         val userInstalled = installed.filter { it.canDeleteUserSkill }
         val removed = state.skills.filter { !it.installed }
 
-        item(key = "zip-import-title") { SmallTitle(stringResource(R.string.ui_install_087db6)) }
+        item(key = "zip-import-title") { EtaPreferenceGroupTitle(stringResource(R.string.ui_install_087db6)) }
         item(key = "zip-import-card") {
-            Card(
+            EtaPreferenceGroup(
                 modifier = Modifier
                     .padding(horizontal = CardHorizontalPadding)
                     .padding(bottom = CardBottomPadding),
             ) {
-                BasicComponent(
+                EtaPreference(
                     title = if (state.isImporting) stringResource(R.string.skills_checking_package) else stringResource(R.string.skills_import_zip),
                     summary = if (state.isImporting) {
                         stringResource(R.string.skills_installing_package)
@@ -95,7 +98,7 @@ fun AgentSkillsScreen(
                                 InfiniteProgressIndicator(size = 22.dp)
                             }
                         } else {
-                            PreferenceIcon(Icons.Rounded.FolderZip, enabled = !operationPending)
+                            EtaPreferenceIcon(Icons.Rounded.FolderZip, enabled = !operationPending, tint = EtaPreferenceColors.Orange)
                         }
                     },
                     enabled = !operationPending,
@@ -106,14 +109,15 @@ fun AgentSkillsScreen(
         }
 
         if (builtinInstalled.isNotEmpty()) {
-            item(key = "builtin-title") { SmallTitle(stringResource(R.string.ui_built_in_skills_1ceedf)) }
+            item(key = "builtin-title") { EtaPreferenceGroupTitle(stringResource(R.string.ui_built_in_skills_1ceedf)) }
             item(key = "builtin-card") {
-                Card(
+                EtaPreferenceGroup(
                     modifier = Modifier
                         .padding(horizontal = CardHorizontalPadding)
                         .padding(bottom = CardBottomPadding),
                 ) {
-                    builtinInstalled.forEach { skill ->
+                    builtinInstalled.forEachIndexed { index, skill ->
+                        if (index > 0) EtaPreferenceDivider()
                         SkillSwitchRow(
                             skill = skill,
                             enabled = !operationPending,
@@ -127,14 +131,15 @@ fun AgentSkillsScreen(
         }
 
         if (userInstalled.isNotEmpty()) {
-            item(key = "user-title") { SmallTitle(stringResource(R.string.ui_user_skills_748e7f)) }
+            item(key = "user-title") { EtaPreferenceGroupTitle(stringResource(R.string.ui_user_skills_748e7f)) }
             item(key = "user-card") {
-                Card(
+                EtaPreferenceGroup(
                     modifier = Modifier
                         .padding(horizontal = CardHorizontalPadding)
                         .padding(bottom = CardBottomPadding),
                 ) {
-                    userInstalled.forEach { skill ->
+                    userInstalled.forEachIndexed { index, skill ->
+                        if (index > 0) EtaPreferenceDivider()
                         SkillSwitchRow(
                             skill = skill,
                             enabled = !operationPending,
@@ -149,18 +154,19 @@ fun AgentSkillsScreen(
         }
 
         if (removed.isNotEmpty()) {
-            item(key = "removed-title") { SmallTitle(stringResource(R.string.ui_removed_4e5c49)) }
+            item(key = "removed-title") { EtaPreferenceGroupTitle(stringResource(R.string.ui_removed_4e5c49)) }
             item(key = "removed-card") {
-                Card(
+                EtaPreferenceGroup(
                     modifier = Modifier
                         .padding(horizontal = CardHorizontalPadding)
                         .padding(bottom = CardBottomPadding),
                 ) {
-                    removed.forEach { skill ->
-                        BasicComponent(
+                    removed.forEachIndexed { index, skill ->
+                        if (index > 0) EtaPreferenceDivider()
+                        EtaPreference(
                             title = skill.name,
                             summary = stringResource(R.string.ui_click_to_reinstall_dc60de),
-                            startAction = { PreferenceIcon(iconForSkill(skill.id), enabled = !operationPending) },
+                            startAction = { EtaPreferenceIcon(iconForSkill(skill.id), enabled = !operationPending, tint = EtaPreferenceColors.Green) },
                             enabled = !operationPending,
                             onClick = {
                                 onAction(AgentSkillsAction.ReinstallBuiltin(skill.id))
@@ -177,7 +183,7 @@ fun AgentSkillsScreen(
                     title = stringResource(R.string.ui_no_skills_installed_yet_4e960f),
                     summary = stringResource(R.string.skills_choose_package),
                     action = {
-                        TextButton(
+                        EtaTextButton(
                             text = stringResource(R.string.skills_import_zip),
                             enabled = !operationPending,
                             onClick = openZipPicker,
@@ -189,7 +195,7 @@ fun AgentSkillsScreen(
     }
 
     state.replacement?.let { replacement ->
-        WindowDialog(
+        EtaWindowDialog(
             show = true,
             title = stringResource(R.string.ui_replace_user_skills_250e98),
             summary = stringResource(R.string.skills_replace_summary, replacement.name, replacement.id),
@@ -205,7 +211,7 @@ fun AgentSkillsScreen(
     }
 
     deleteTarget?.let { skill ->
-        WindowDialog(
+        EtaWindowDialog(
             show = true,
             title = stringResource(R.string.ui_delete_user_skills_f319a9),
             summary = stringResource(R.string.skills_delete_summary, skill.name),
@@ -225,13 +231,13 @@ fun AgentSkillsScreen(
     }
 
     state.notice?.let { notice ->
-        WindowDialog(
+        EtaWindowDialog(
             show = true,
             title = notice.title,
             summary = notice.message,
             onDismissRequest = { onAction(AgentSkillsAction.DismissNotice) },
         ) {
-            TextButton(
+            EtaTextButton(
                 text = stringResource(R.string.ui_knew_cb63c6),
                 onClick = { onAction(AgentSkillsAction.DismissNotice) },
                 modifier = Modifier.fillMaxWidth(),

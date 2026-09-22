@@ -12,9 +12,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Composable
 internal fun ItemDescriptionDialog(
@@ -22,7 +20,7 @@ internal fun ItemDescriptionDialog(
     description: String,
     onDismiss: () -> Unit,
 ) {
-    WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
+    EtaWindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -34,7 +32,7 @@ internal fun ItemDescriptionDialog(
                 modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
                     .verticalScroll(rememberScrollState()),
             )
-            TextButton(
+            EtaTextButton(
                 text = stringResource(R.string.action_close),
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth(),

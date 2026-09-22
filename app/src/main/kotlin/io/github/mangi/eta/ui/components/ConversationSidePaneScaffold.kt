@@ -1,89 +1,47 @@
 package io.github.mangi.eta.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
 import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.gestures.animateTo
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.AbsoluteRoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.Extension
-import androidx.compose.material.icons.rounded.Inventory2
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Memory
-import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.TheaterComedy
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.shadow.Shadow
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigationevent.NavigationEventInfo
@@ -94,66 +52,17 @@ import io.github.mangi.eta.ui.model.ConversationPaneUiState
 import io.github.mangi.eta.ui.model.ConversationSummaryUi
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.collectLatest
-import top.yukonga.miuix.kmp.basic.DropdownDefaults
-import top.yukonga.miuix.kmp.basic.DropdownImpl
-import top.yukonga.miuix.kmp.basic.DropdownItem
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.InputField
-import top.yukonga.miuix.kmp.basic.ListPopupColumn
-import top.yukonga.miuix.kmp.basic.ListPopupDefaults
-import top.yukonga.miuix.kmp.basic.PopupPositionProvider
-import top.yukonga.miuix.kmp.basic.SearchBar
-import top.yukonga.miuix.kmp.basic.Surface
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.blur.BlendColorEntry
-import top.yukonga.miuix.kmp.blur.BlurDefaults
-import top.yukonga.miuix.kmp.blur.LayerBackdrop
-import top.yukonga.miuix.kmp.blur.textureBlur
-import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
-import top.yukonga.miuix.kmp.squircle.absoluteSquircleClip
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.overScrollVertical
-import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import top.yukonga.miuix.kmp.window.WindowListPopup
 
-private object DrawerMetrics {
+private object ConversationPaneMetrics {
     val PaneMaxWidth = 340.dp
     val PaneWidthFraction = 0.84f
-    val ForegroundCornerRadiusFallback = 24.dp
-    val ForegroundShadowRadius = 12.dp
-    const val ForegroundShadowAlpha = 0.12f
+    const val ChatScrimAlpha = 0.16f
     const val SettleDampingRatio = 1f
     const val SettleStiffness = 146f
     const val SettleVisibilityThresholdPx = 0.5f
     const val SettlePositionThresholdFraction = 0.5f
-    val PaneHorizontalPadding = 16.dp
-    val TopInset = 16.dp
-    val AfterActionBar = 18.dp
-    val BottomInset = 12.dp
-    val ActionIconSize = 20.dp
-    val SectionTopPadding = 8.dp
-    val SectionBottomPadding = 10.dp
-    val SectionIconSize = 14.dp
-    val SectionIconGap = 8.dp
-    val SectionCountGap = 12.dp
-    val RowMinHeight = 48.dp
-    val RowGap = 4.dp
-    val RowCornerRadius = 12.dp
-    val RowHorizontalPadding = 12.dp
-    val RowVerticalPadding = 12.dp
-    val ActiveDotSize = 6.dp
-    val ActiveDotGap = 10.dp
-    val EmptyVerticalPadding = 28.dp
-    val DockTopGap = 10.dp
-    val DockEntryCornerRadius = 12.dp
-    val DockEntryIconSize = 20.dp
-    val DockEntryLabelGap = 3.dp
-    val DockEntryVerticalPadding = 5.dp
-}
-
-private enum class ConversationPaneAnchor {
-    Closed,
-    Open,
 }
 
 @Composable
@@ -182,7 +91,7 @@ fun ConversationSidePaneScaffold(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val density = LocalDensity.current
-        val paneWidth = minOf(maxWidth * DrawerMetrics.PaneWidthFraction, DrawerMetrics.PaneMaxWidth)
+        val paneWidth = minOf(maxWidth * ConversationPaneMetrics.PaneWidthFraction, ConversationPaneMetrics.PaneMaxWidth)
         val paneWidthPx = with(density) { paneWidth.toPx() }
         val anchors = remember(paneWidthPx) {
             DraggableAnchors {
@@ -198,36 +107,68 @@ fun ConversationSidePaneScaffold(
         }
         val settleAnimation = remember {
             spring<Float>(
-                dampingRatio = DrawerMetrics.SettleDampingRatio,
-                stiffness = DrawerMetrics.SettleStiffness,
-                visibilityThreshold = DrawerMetrics.SettleVisibilityThresholdPx,
+                dampingRatio = ConversationPaneMetrics.SettleDampingRatio,
+                stiffness = ConversationPaneMetrics.SettleStiffness,
+                visibilityThreshold = ConversationPaneMetrics.SettleVisibilityThresholdPx,
             )
         }
         val flingBehavior = AnchoredDraggableDefaults.flingBehavior(
             state = paneDragState,
             positionalThreshold = { distance ->
-                distance * DrawerMetrics.SettlePositionThresholdFraction
+                distance * ConversationPaneMetrics.SettlePositionThresholdFraction
             },
             animationSpec = settleAnimation,
         )
         val currentVisible by rememberUpdatedState(visible)
         val currentOnOpen by rememberUpdatedState(onOpen)
         val currentOnDismiss by rememberUpdatedState(onDismiss)
-        val shouldClipForeground by remember(paneDragState) {
+        val hapticFeedback = LocalHapticFeedback.current
+        val currentHapticFeedback by rememberUpdatedState(hapticFeedback)
+        val dragInteractions = remember { MutableInteractionSource() }
+        val isDragging by dragInteractions.collectIsDraggedAsState()
+        LaunchedEffect(dragInteractions) {
+            dragInteractions.interactions.collect { interaction ->
+                if (interaction is DragInteraction.Stop) {
+                    currentHapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                }
+            }
+        }
+        val isRevealed by remember(paneDragState) {
             derivedStateOf {
                 val offset = paneDragState.offset
                 !offset.isNaN() && offset > 0.5f
             }
         }
-        val systemCornerRadius = rememberNavSystemCornerRadius()
-        val foregroundCornerRadius = systemCornerRadius.takeIf { it > 0.dp }
-            ?: DrawerMetrics.ForegroundCornerRadiusFallback
+        val panelListState = rememberLazyListState()
+        val scope = rememberCoroutineScope()
+        val focusManager = LocalFocusManager.current
+        val keyboard = LocalSoftwareKeyboardController.current
+        val closePane: () -> Unit = {
+            currentHapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
+            focusManager.clearFocus()
+            keyboard?.hide()
+            if (currentVisible) {
+                currentOnDismiss()
+            } else {
+                scope.launch { paneDragState.animateTo(ConversationPaneAnchor.Closed, settleAnimation) }
+            }
+        }
+        LaunchedEffect(isRevealed) {
+            if (isRevealed) {
+                focusManager.clearFocus()
+                keyboard?.hide()
+            }
+        }
 
         SideEffect {
             paneDragState.updateAnchors(anchors)
         }
 
         LaunchedEffect(visible, paneWidthPx) {
+            if (!visible && isRevealed) {
+                focusManager.clearFocus()
+                keyboard?.hide()
+            }
             val target = if (visible) ConversationPaneAnchor.Open else ConversationPaneAnchor.Closed
             if (paneDragState.targetValue != target || paneDragState.settledValue != target) {
                 paneDragState.animateTo(target, settleAnimation)
@@ -235,10 +176,16 @@ fun ConversationSidePaneScaffold(
         }
 
         LaunchedEffect(paneDragState) {
-            snapshotFlow { paneDragState.settledValue }.collectLatest { settledValue ->
+            conversationPaneSettledValues(paneDragState) { isDragging }.collectLatest { settledValue ->
                 val settledOpen = settledValue == ConversationPaneAnchor.Open
                 if (settledOpen != currentVisible) {
-                    if (settledOpen) currentOnOpen() else currentOnDismiss()
+                    if (settledOpen) {
+                        currentOnOpen()
+                    } else {
+                        focusManager.clearFocus()
+                        keyboard?.hide()
+                        currentOnDismiss()
+                    }
                 }
             }
         }
@@ -247,655 +194,98 @@ fun ConversationSidePaneScaffold(
         // 处理侧栏返回，避免它抢先消费二级页面的第一次返回事件。
         NavigationBackHandler(
             state = navigationEventState,
-            isBackEnabled = visible &&
+            isBackEnabled = isRevealed &&
                 backHandlerEnabled &&
                 sceneLifecycleState == Lifecycle.State.RESUMED,
-            onBackCompleted = onDismiss,
-        )
-
-        ConversationPanePanel(
-            state = state,
-            width = paneWidth,
-            onSearchChange = onSearchChange,
-            onConversationSelected = onConversationSelected,
-            onConversationRename = onConversationRename,
-            onConversationExport = onConversationExport,
-            onConversationDelete = onConversationDelete,
-            onOpenSettings = onOpenSettings,
-            onOpenModelProviders = onOpenModelProviders,
-            onOpenTools = onOpenTools,
-            onOpenSkills = onOpenSkills,
-            onOpenCharacters = onOpenCharacters,
-            onOpenPermissions = onOpenPermissions,
-            modifier = Modifier.zIndex(0f),
+            onBackCompleted = closePane,
         )
 
         Box(
-            modifier = Modifier
-                .width(paneWidth)
-                .fillMaxHeight()
-                .graphicsLayer {
-                    val offset = paneDragState.offset.takeUnless(Float::isNaN) ?: 0f
-                    val progress = if (paneWidthPx > 0f) {
-                        (offset / paneWidthPx).coerceIn(0f, 1f)
-                    } else {
-                        0f
-                    }
-                    alpha = 1f - progress
-                }
-                .background(MiuixTheme.colorScheme.windowDimming)
-                .zIndex(0.5f),
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .offset {
-                    val offset = paneDragState.offset.takeUnless(Float::isNaN)
-                        ?: if (visible) paneWidthPx else 0f
-                    IntOffset(offset.roundToInt(), 0)
-                }
-                .then(
-                    if (shouldClipForeground) {
-                        Modifier
-                            .dropShadow(
-                                shape = AbsoluteRoundedCornerShape(
-                                    topLeft = foregroundCornerRadius,
-                                    topRight = 0.dp,
-                                    bottomRight = 0.dp,
-                                    bottomLeft = foregroundCornerRadius,
-                                ),
-                                shadow = Shadow(
-                                    radius = DrawerMetrics.ForegroundShadowRadius,
-                                    color = Color.Black,
-                                    alpha = DrawerMetrics.ForegroundShadowAlpha,
-                                ),
-                            )
-                            .absoluteSquircleClip(
-                                topLeft = foregroundCornerRadius,
-                                topRight = 0.dp,
-                                bottomRight = 0.dp,
-                                bottomLeft = foregroundCornerRadius,
-                            )
-                    } else {
-                        Modifier
-                    },
-                )
-                // 保持物理左右方向，不随 RTL 镜像：会话列表始终从屏幕左侧显露。
+            modifier = Modifier.fillMaxSize()
+                .clipToBounds()
+                .background(conversationPaneContainerColor())
+                // 手势由共同容器拥有，侧栏和聊天舞台均可拖动；子级先处理滚动与选择。
                 .anchoredDraggable(
                     state = paneDragState,
                     reverseDirection = false,
                     orientation = Orientation.Horizontal,
-                    enabled = backHandlerEnabled,
+                    enabled = backHandlerEnabled && sceneLifecycleState == Lifecycle.State.RESUMED,
                     flingBehavior = flingBehavior,
-                )
-                .zIndex(1f),
-        ) {
-            content()
-            if (visible) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable(onClick = onDismiss),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConversationPanePanel(
-    state: ConversationPaneUiState,
-    width: androidx.compose.ui.unit.Dp,
-    onSearchChange: (String) -> Unit,
-    onConversationSelected: (String) -> Unit,
-    onConversationRename: (ConversationSummaryUi) -> Unit,
-    onConversationExport: (ConversationSummaryUi) -> Unit,
-    onConversationDelete: (ConversationSummaryUi) -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenModelProviders: () -> Unit,
-    onOpenTools: () -> Unit,
-    onOpenSkills: () -> Unit,
-    onOpenCharacters: () -> Unit,
-    onOpenPermissions: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // state.conversations 已由 AgentAppState 按标题、预览与消息内容过滤。
-    val query = state.searchQuery.trim()
-    val groups = remember(state.conversations) { state.conversations.groupForDrawer() }
-    val density = LocalDensity.current
-
-    Surface(
-        modifier = modifier
-            .width(width)
-            .fillMaxHeight(),
-        color = MiuixTheme.colorScheme.surface,
-        contentColor = MiuixTheme.colorScheme.onSurface,
-    ) {
-        // 列表全高滚动，搜索区与 Dock 作为浮层盖在内容上；两个浮层用与顶栏相同的
-        // textureBlur 采样列表 backdrop，内容滚入边缘时呈现毛玻璃而不是硬裁切。
-        // 有内容滚到浮层下方时浮层边缘出现分隔线，静止在顶部/底部时保持无边界。
-        val backdrop = rememberTopBarBackdrop()
-        var headerHeightPx by remember { mutableIntStateOf(0) }
-        var dockHeightPx by remember { mutableIntStateOf(0) }
-        val listState = rememberLazyListState()
-        val showHeaderDivider by remember { derivedStateOf { listState.canScrollBackward } }
-        val showDockDivider by remember { derivedStateOf { listState.canScrollForward } }
-        Box(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .captureForTopBar(backdrop)
-                    .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
-                    )
-                    .padding(horizontal = DrawerMetrics.PaneHorizontalPadding)
-                    .scrollEndHaptic()
-                    .overScrollVertical(),
-                contentPadding = PaddingValues(
-                    top = with(density) { headerHeightPx.toDp() },
-                    bottom = with(density) { dockHeightPx.toDp() },
+                    interactionSource = dragInteractions,
                 ),
-                verticalArrangement = Arrangement.spacedBy(DrawerMetrics.RowGap),
-                overscrollEffect = null,
-            ) {
-                if (state.conversations.isEmpty()) {
-                    item {
-                        EmptyConversations(isSearching = query.isNotBlank())
-                    }
-                } else {
-                    groups.forEach { group ->
-                        item(key = "section-${group.section}") {
-                            ConversationSectionHeader(group = group)
-                        }
-                        items(
-                            items = group.items,
-                            key = { it.id },
-                        ) { conversation ->
-                            ConversationTextRow(
-                                conversation = conversation,
-                                selected = conversation.id == state.selectedConversationId,
-                                onClick = { onConversationSelected(conversation.id) },
-                                onRename = { onConversationRename(conversation) },
-                                onExport = { onConversationExport(conversation) },
-                                onDelete = { onConversationDelete(conversation) },
-                            )
-                        }
-                    }
-                }
-            }
-            PaneFrostRegion(
-                backdrop = backdrop,
-                showDivider = showHeaderDivider,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .onSizeChanged { headerHeightPx = it.height },
-            ) {
-                Column(
-                    modifier = Modifier
-                        .windowInsetsPadding(
-                            WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-                        )
-                        .padding(horizontal = DrawerMetrics.PaneHorizontalPadding),
-                ) {
-                    Spacer(modifier = Modifier.height(DrawerMetrics.TopInset))
-                    PaneActionBar(
-                        query = state.searchQuery,
+            contentAlignment = AbsoluteAlignment.TopLeft,
+        ) {
+            // 两个槽位并排测量和放置，由同一位移推移；不在聊天内容下面叠放侧栏。
+            // 侧栏保留组合，避免每次起手重新创建列表和搜索框。
+            Layout(
+                modifier = Modifier.fillMaxSize(),
+                content = {
+                    ConversationPanePanel(
+                        state = state,
+                        width = paneWidth,
+                        listState = panelListState,
                         onSearchChange = onSearchChange,
-                    )
-                    Spacer(modifier = Modifier.height(DrawerMetrics.AfterActionBar))
-                }
-            }
-            PaneFrostRegion(
-                backdrop = backdrop,
-                showDivider = showDockDivider,
-                dividerAtTop = true,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .onSizeChanged { dockHeightPx = it.height },
-            ) {
-                Column(
-                    modifier = Modifier
-                        .windowInsetsPadding(
-                            WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
-                        )
-                        .padding(horizontal = DrawerMetrics.PaneHorizontalPadding),
-                ) {
-                    Spacer(modifier = Modifier.height(DrawerMetrics.DockTopGap))
-                    PaneDock(
+                        onConversationSelected = onConversationSelected,
+                        onConversationRename = onConversationRename,
+                        onConversationExport = onConversationExport,
+                        onConversationDelete = onConversationDelete,
                         onOpenSettings = onOpenSettings,
                         onOpenModelProviders = onOpenModelProviders,
                         onOpenTools = onOpenTools,
                         onOpenSkills = onOpenSkills,
                         onOpenCharacters = onOpenCharacters,
                         onOpenPermissions = onOpenPermissions,
+                        modifier = Modifier
+                            .focusProperties { onEnter = { if (!isRevealed) cancelFocusChange() } }
+                            .focusGroup()
+                            .then(if (!isRevealed) Modifier.clearAndSetSemantics {} else Modifier),
                     )
-                    Spacer(modifier = Modifier.height(DrawerMetrics.BottomInset))
+                    Box(
+                        modifier = Modifier.fillMaxSize()
+                            .drawWithContent {
+                                drawContent()
+                                val progress = conversationPaneMotion(paneDragState.offset, paneWidthPx).progress
+                                drawRect(Color.Black, alpha = ConversationPaneMetrics.ChatScrimAlpha * progress)
+                            }
+                            .background(MiuixTheme.colorScheme.background),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .focusProperties {
+                                    onEnter = { if (isRevealed) cancelFocusChange() }
+                                }
+                                .focusGroup()
+                                .then(if (isRevealed) Modifier.clearAndSetSemantics {} else Modifier),
+                        ) {
+                            content()
+                        }
+                        if (isRevealed) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().clickable(
+                                    interactionSource = null,
+                                    indication = null,
+                                    onClickLabel = stringResource(R.string.action_close),
+                                    onClick = closePane,
+                                ),
+                            )
+                        }
+                    }
+                },
+            ) { measurables, constraints ->
+                val panel = measurables[0].measure(
+                    Constraints.fixed(paneWidthPx.roundToInt(), constraints.maxHeight),
+                )
+                val page = measurables[1].measure(
+                    Constraints.fixed(constraints.maxWidth, constraints.maxHeight),
+                )
+                layout(constraints.maxWidth, constraints.maxHeight) {
+                    // 物理左侧是会话区；不随 RTL 改变两个槽位的关系。
+                    val motion = conversationPaneMotion(paneDragState.offset, paneWidthPx)
+                    val offset = motion.foregroundOffset.roundToInt()
+                    panel.placeWithLayer(offset - panel.width, 0)
+                    page.placeWithLayer(offset, 0)
                 }
             }
         }
     }
-}
-
-/**
- * 侧栏边缘的毛玻璃区域。毛玻璃不可用时（关闭模糊或设备不支持 RuntimeShader）
- * 退回不透明底色，行为与之前一致。
- */
-@Composable
-private fun PaneFrostRegion(
-    backdrop: LayerBackdrop?,
-    modifier: Modifier = Modifier,
-    showDivider: Boolean = false,
-    dividerAtTop: Boolean = false,
-    content: @Composable () -> Unit,
-) {
-    val surfaceColor = MiuixTheme.colorScheme.surface
-    val frostModifier = if (backdrop == null) {
-        modifier.background(surfaceColor)
-    } else {
-        modifier.textureBlur(
-            backdrop = backdrop,
-            shape = RectangleShape,
-            blurRadius = PaneFrostBlurRadius,
-            colors = BlurDefaults.blurColors(
-                blendColors = listOf(
-                    BlendColorEntry(surfaceColor.copy(alpha = PaneFrostSurfaceAlpha)),
-                ),
-            ),
-        )
-    }
-    Box(modifier = frostModifier) {
-        content()
-        AnimatedVisibility(
-            visible = showDivider,
-            modifier = Modifier
-                .align(if (dividerAtTop) Alignment.TopCenter else Alignment.BottomCenter)
-                .fillMaxWidth(),
-            enter = fadeIn(animationSpec = tween(durationMillis = 140)),
-            exit = fadeOut(animationSpec = tween(durationMillis = 140)),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(PaneDividerThickness)
-                    .background(MiuixTheme.colorScheme.outline.copy(alpha = PaneDividerAlpha)),
-            )
-        }
-    }
-}
-
-private val PaneDividerThickness = 0.5.dp
-private const val PaneDividerAlpha = 0.5f
-private const val PaneFrostBlurRadius = 25f
-private const val PaneFrostSurfaceAlpha = 0.78f
-
-@Composable
-private fun PaneActionBar(
-    query: String,
-    onSearchChange: (String) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SearchBar(
-            modifier = Modifier.weight(1f),
-            expanded = false,
-            onExpandedChange = {},
-            inputField = {
-                InputField(
-                    query = query,
-                    onQueryChange = onSearchChange,
-                    onSearch = onSearchChange,
-                    expanded = false,
-                    onExpandedChange = {},
-                    label = stringResource(R.string.conversation_search_hint),
-                )
-            },
-            content = {},
-        )
-    }
-}
-
-@Composable
-private fun ConversationSectionHeader(
-    group: ConversationDrawerGroup,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(
-                top = DrawerMetrics.SectionTopPadding,
-                bottom = DrawerMetrics.SectionBottomPadding,
-            ),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = Icons.Rounded.Schedule,
-            contentDescription = null,
-            modifier = Modifier.size(DrawerMetrics.SectionIconSize),
-            tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
-        )
-        Spacer(modifier = Modifier.width(DrawerMetrics.SectionIconGap))
-        Text(
-            text = group.localizedLabel(),
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            style = MiuixTheme.textStyles.footnote1,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(modifier = Modifier.width(DrawerMetrics.SectionCountGap))
-        Text(
-            text = group.items.size.toString(),
-            color = MiuixTheme.colorScheme.onSurfaceVariantActions,
-            style = MiuixTheme.textStyles.footnote1,
-            fontWeight = FontWeight.Medium,
-        )
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ConversationTextRow(
-    conversation: ConversationSummaryUi,
-    selected: Boolean,
-    onClick: () -> Unit,
-    onRename: () -> Unit,
-    onExport: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    var showActionMenu by remember { mutableStateOf(false) }
-    val hapticFeedback = LocalHapticFeedback.current
-
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = DrawerMetrics.RowMinHeight)
-                .clip(RoundedCornerShape(DrawerMetrics.RowCornerRadius))
-                .background(
-                    if (selected) {
-                        MiuixTheme.colorScheme.surfaceContainerHigh
-                    } else {
-                        Color.Transparent
-                    },
-                )
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = {
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showActionMenu = true
-                    },
-                )
-                .padding(
-                    horizontal = DrawerMetrics.RowHorizontalPadding,
-                    vertical = DrawerMetrics.RowVerticalPadding,
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-            val title = conversation.title.ifBlank { conversation.preview }
-            Text(
-                text = title,
-                color = if (selected) {
-                    MiuixTheme.colorScheme.primary
-                } else {
-                    MiuixTheme.colorScheme.onSurface
-                },
-                style = MiuixTheme.textStyles.body1,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            // 标题与角色名相同（如未改名的角色会话）时不再重复第二行。
-            conversation.characterName?.takeIf { it != title }?.let { name ->
-                Text(name, style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            }
-            if (conversation.isActiveRun) {
-                Box(
-                    modifier = Modifier
-                        .padding(start = DrawerMetrics.ActiveDotGap)
-                        .size(DrawerMetrics.ActiveDotSize)
-                        .clip(CircleShape)
-                        .background(MiuixTheme.colorScheme.primary),
-                )
-            }
-        }
-
-        WindowListPopup(
-            show = showActionMenu,
-            popupPositionProvider = ListPopupDefaults.ContextMenuPositionProvider,
-            alignment = PopupPositionProvider.Align.BottomEnd,
-            onDismissRequest = { showActionMenu = false },
-        ) {
-            val renameText = stringResource(R.string.action_rename)
-            val exportText = stringResource(R.string.action_export)
-            val deleteText = stringResource(R.string.action_delete)
-            val renameItem = remember(renameText) {
-                DropdownItem(
-                    text = renameText,
-                    icon = { modifier ->
-                        Icon(
-                            imageVector = Icons.Rounded.Edit,
-                            contentDescription = null,
-                            modifier = modifier.size(DrawerMetrics.ActionIconSize),
-                        )
-                    },
-                )
-            }
-            val exportItem = remember(exportText) {
-                DropdownItem(
-                    text = exportText,
-                    icon = { modifier ->
-                        Icon(
-                            imageVector = Icons.Rounded.Download,
-                            contentDescription = null,
-                            modifier = modifier.size(DrawerMetrics.ActionIconSize),
-                        )
-                    },
-                )
-            }
-            val deleteItem = remember(deleteText) {
-                DropdownItem(
-                    text = deleteText,
-                    icon = { modifier ->
-                        Icon(
-                            imageVector = Icons.Rounded.Delete,
-                            contentDescription = null,
-                            modifier = modifier.size(DrawerMetrics.ActionIconSize),
-                            tint = MiuixTheme.colorScheme.error,
-                        )
-                    },
-                )
-            }
-            val deleteColors = DropdownDefaults.dropdownColors(
-                contentColor = MiuixTheme.colorScheme.error,
-                selectedContentColor = MiuixTheme.colorScheme.error,
-                selectedIndicatorColor = MiuixTheme.colorScheme.error,
-            )
-            ListPopupColumn {
-                DropdownImpl(
-                    item = renameItem,
-                    optionSize = 3,
-                    isSelected = false,
-                    index = 0,
-                    onSelectedIndexChange = {
-                        showActionMenu = false
-                        onRename()
-                    },
-                )
-                DropdownImpl(
-                    item = exportItem,
-                    optionSize = 3,
-                    isSelected = false,
-                    index = 1,
-                    onSelectedIndexChange = {
-                        showActionMenu = false
-                        onExport()
-                    },
-                )
-                DropdownImpl(
-                    item = deleteItem,
-                    optionSize = 3,
-                    isSelected = false,
-                    index = 2,
-                    dropdownColors = deleteColors,
-                    onSelectedIndexChange = {
-                        showActionMenu = false
-                        onDelete()
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyConversations(isSearching: Boolean) {
-    Text(
-        text = stringResource(
-            if (isSearching) R.string.conversation_no_results else R.string.conversation_empty,
-        ),
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        style = MiuixTheme.textStyles.body2,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(
-            horizontal = DrawerMetrics.RowHorizontalPadding,
-            vertical = DrawerMetrics.EmptyVerticalPadding,
-        ),
-    )
-}
-
-@Composable
-private fun PaneDock(
-    onOpenSettings: () -> Unit,
-    onOpenModelProviders: () -> Unit,
-    onOpenTools: () -> Unit,
-    onOpenSkills: () -> Unit,
-    onOpenCharacters: () -> Unit,
-    onOpenPermissions: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        DockEntry(
-            icon = Icons.Rounded.Settings,
-            label = "设置",
-            onClick = onOpenSettings,
-            modifier = Modifier.weight(1f),
-        )
-        DockEntry(
-            icon = Icons.Rounded.Memory,
-            label = "模型",
-            onClick = onOpenModelProviders,
-            modifier = Modifier.weight(1f),
-        )
-        DockEntry(
-            icon = Icons.Rounded.Inventory2,
-            label = "工具",
-            onClick = onOpenTools,
-            modifier = Modifier.weight(1f),
-        )
-        DockEntry(
-            icon = Icons.Rounded.Extension,
-            label = "Skills",
-            onClick = onOpenSkills,
-            modifier = Modifier.weight(1f),
-        )
-        DockEntry(
-            icon = Icons.Rounded.Lock,
-            label = "权限",
-            onClick = onOpenPermissions,
-            modifier = Modifier.weight(1f),
-        )
-        DockEntry(
-            icon = Icons.Rounded.TheaterComedy,
-            label = "角色",
-            onClick = onOpenCharacters,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun DockEntry(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(DrawerMetrics.DockEntryCornerRadius))
-            .clickable(onClickLabel = label, onClick = onClick)
-            .padding(vertical = DrawerMetrics.DockEntryVerticalPadding),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(DrawerMetrics.DockEntryIconSize),
-            tint = MiuixTheme.colorScheme.onSurface,
-        )
-        Spacer(modifier = Modifier.height(DrawerMetrics.DockEntryLabelGap))
-        Text(
-            text = label,
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-private data class ConversationDrawerGroup(
-    val section: ConversationDrawerSection,
-    val items: List<ConversationSummaryUi>,
-)
-
-private sealed interface ConversationDrawerSection {
-    data object Pinned : ConversationDrawerSection
-    data object Today : ConversationDrawerSection
-    data class Dated(val label: String) : ConversationDrawerSection
-}
-
-@Composable
-private fun ConversationDrawerGroup.localizedLabel(): String = when (val value = section) {
-    ConversationDrawerSection.Pinned -> stringResource(R.string.conversation_section_pinned)
-    ConversationDrawerSection.Today -> stringResource(R.string.conversation_section_today)
-    is ConversationDrawerSection.Dated -> value.label
-}
-
-private fun List<ConversationSummaryUi>.groupForDrawer(): List<ConversationDrawerGroup> {
-    if (isEmpty()) return emptyList()
-    val groups = mutableListOf<ConversationDrawerGroup>()
-    for (conversation in this) {
-        val section = conversation.drawerSection()
-        val last = groups.lastOrNull()
-        if (last?.section == section) {
-            groups[groups.lastIndex] = last.copy(items = last.items + conversation)
-        } else {
-            groups += ConversationDrawerGroup(section = section, items = listOf(conversation))
-        }
-    }
-    return groups
-}
-
-private fun ConversationSummaryUi.drawerSection(): ConversationDrawerSection = when {
-    isPinned -> ConversationDrawerSection.Pinned
-    isActiveRun || isUpdatedToday(updatedAtMillis) -> ConversationDrawerSection.Today
-    else -> ConversationDrawerSection.Dated(timeLabel)
-}
-
-private fun isUpdatedToday(timestampMillis: Long): Boolean {
-    if (timestampMillis <= 0L) return true
-    val now = java.util.Calendar.getInstance()
-    val target = java.util.Calendar.getInstance().apply { timeInMillis = timestampMillis }
-    return now.get(java.util.Calendar.ERA) == target.get(java.util.Calendar.ERA) &&
-        now.get(java.util.Calendar.YEAR) == target.get(java.util.Calendar.YEAR) &&
-        now.get(java.util.Calendar.DAY_OF_YEAR) == target.get(java.util.Calendar.DAY_OF_YEAR)
 }

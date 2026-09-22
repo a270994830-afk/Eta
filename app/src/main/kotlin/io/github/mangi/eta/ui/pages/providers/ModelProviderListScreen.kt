@@ -3,8 +3,6 @@ package io.github.mangi.eta.ui.pages.providers
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -27,11 +25,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.EtaApp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.ui.components.EtaPreferenceRow
 import io.github.mangi.eta.data.model.ProviderSetting
 import io.github.mangi.eta.data.model.ProviderSourceTypes
 import io.github.mangi.eta.data.model.typeLabel
 import io.github.mangi.eta.data.repository.ProviderRepository
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
+import io.github.mangi.eta.ui.components.EtaArrowPreference
+import io.github.mangi.eta.ui.components.EtaOverlayDialog
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
 import io.github.mangi.eta.ui.navigation.AppRoute
@@ -41,8 +42,6 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -88,7 +87,7 @@ internal fun ModelProviderListScreen(
 
         item(key = "create_section") {
             ProviderSection(title = stringResource(R.string.ui_add_new_provider_74df54)) {
-                ArrowPreference(
+                EtaArrowPreference(
                     title = stringResource(R.string.ui_added_openai_compatible_6bd471),
                     summary = stringResource(R.string.ui_support_chatgpt_deepseek_kimi_glm_qwen_etc_b31d02),
                     startAction = {
@@ -97,7 +96,7 @@ internal fun ModelProviderListScreen(
                     onClick = { onNavigate(AppRoute.ModelProviderNew(NewProviderType.OpenAiCompatible)) },
                 )
 
-                ArrowPreference(
+                EtaArrowPreference(
                     title = stringResource(R.string.ui_new_anthropic_db6098),
                     summary = stringResource(R.string.ui_support_anthropic_claude_official_or_compatible_api_de3f80),
                     startAction = {
@@ -150,7 +149,7 @@ internal fun ModelProviderListScreen(
     }
 
     if (providerToDelete != null) {
-        OverlayDialog(
+        EtaOverlayDialog(
             show = true,
             title = stringResource(R.string.ui_remove_provider_9f848f),
             summary = stringResource(R.string.provider_delete_summary, providerToDelete?.name.orEmpty()),
@@ -184,19 +183,14 @@ private fun ProviderListItem(
     onSelect: () -> Unit,
 ) {
     val opacity = if (provider.isEnabled) 1f else 0.6f
-    Row(
+    EtaPreferenceRow(
+        title = null,
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(
-                onClick = onOpen,
-                onLongClick = onDelete
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .combinedClickable(onClick = onOpen, onLongClick = onDelete)
             .graphicsLayer { alpha = opacity },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ProviderIcon(provider)
-        Column(modifier = Modifier.weight(1f)) {
+        startAction = { ProviderIcon(provider) },
+        titleContent = {
             Text(
                 text = provider.name,
                 style = MiuixTheme.textStyles.headline1,
@@ -230,17 +224,19 @@ private fun ProviderListItem(
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
-        }
-        IconButton(onClick = onSelect) {
-            Icon(
-                imageVector = if (isSelected) Icons.Rounded.Check else Icons.Rounded.RadioButtonUnchecked,
-                contentDescription = if (isSelected) {
-                    stringResource(R.string.provider_selected)
-                } else {
-                    stringResource(R.string.provider_set_current)
-                },
-                tint = if (isSelected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantActions,
-            )
-        }
-    }
+        },
+        endActions = {
+            IconButton(onClick = onSelect) {
+                Icon(
+                    imageVector = if (isSelected) Icons.Rounded.Check else Icons.Rounded.RadioButtonUnchecked,
+                    contentDescription = if (isSelected) {
+                        stringResource(R.string.provider_selected)
+                    } else {
+                        stringResource(R.string.provider_set_current)
+                    },
+                    tint = if (isSelected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantActions,
+                )
+            }
+        },
+    )
 }

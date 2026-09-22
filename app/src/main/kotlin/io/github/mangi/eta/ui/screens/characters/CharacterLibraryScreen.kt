@@ -20,24 +20,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.ui.app.CharacterLibraryStore
+import io.github.mangi.eta.ui.components.EtaArrowPreference
+import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaPreferenceGroup
+import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
+import io.github.mangi.eta.ui.components.EtaTextButton
 import io.github.mangi.eta.ui.components.ListEmptyState
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
 import io.github.mangi.eta.ui.navigation.AppRoute
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.SearchBar
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
-internal val CharacterCardPadding = 12.dp
+internal val CharacterCardPadding = 16.dp
 
 @Composable
 internal fun CharacterLibraryScreen(
@@ -105,12 +106,12 @@ internal fun CharacterLibraryScreen(
                         summary = "创建一个角色，或导入 PNG、JSON 角色卡开始对话",
                         action = {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                TextButton(
+                                EtaTextButton(
                                     text = "恢复默认角色",
                                     onClick = { store.restoreDefaultCharacter() },
                                     enabled = !store.busy,
                                 )
-                                TextButton(
+                                EtaTextButton(
                                     text = "创建角色",
                                     onClick = createCharacter,
                                     colors = ButtonDefaults.textButtonColorsPrimary(),
@@ -130,10 +131,10 @@ internal fun CharacterLibraryScreen(
             }
         }
         items(store.filteredCharacters, key = { it.id }) { profile ->
-            Card(
+            EtaCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = CharacterCardPadding, vertical = 6.dp),
+                    .padding(horizontal = CharacterCardPadding, vertical = 8.dp),
                 insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 pressFeedbackType = PressFeedbackType.Sink,
                 onClick = { if (!store.busy) onNavigate(AppRoute.CharacterDetail(profile.id)) },
@@ -158,14 +159,14 @@ internal fun CharacterLibraryScreen(
                 }
             }
         }
-        item(key = "persona-title") { SmallTitle("我的") }
+        item(key = "persona-title") { EtaPreferenceGroupTitle("我的") }
         item(key = "persona") {
-            Card(
+            EtaPreferenceGroup(
                 modifier = Modifier
                     .padding(horizontal = CharacterCardPadding)
-                    .padding(bottom = 12.dp),
+                    .padding(bottom = 16.dp),
             ) {
-                ArrowPreference(
+                EtaArrowPreference(
                     title = "我的人设",
                     summary = "设置角色如何称呼你，以及你在故事中的身份",
                     onClick = { onNavigate(AppRoute.CharacterPersona) },

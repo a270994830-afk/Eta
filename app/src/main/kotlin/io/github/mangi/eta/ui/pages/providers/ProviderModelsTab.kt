@@ -35,7 +35,6 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,8 +65,19 @@ import io.github.mangi.eta.data.model.ReasoningEffort
 import io.github.mangi.eta.data.repository.ModelRepository
 import io.github.mangi.eta.data.repository.RemoteModelFetcher
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
+import io.github.mangi.eta.ui.components.EtaArrowPreference
+import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaCheckboxPreference
+import io.github.mangi.eta.ui.components.EtaOverlayDialog
+import io.github.mangi.eta.ui.components.EtaPreferenceColors
+import io.github.mangi.eta.ui.components.EtaPreferenceDivider
+import io.github.mangi.eta.ui.components.EtaPreferenceGroup
+import io.github.mangi.eta.ui.components.EtaPreferenceGroupItem
+import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
+import io.github.mangi.eta.ui.components.EtaPreferenceIcon
+import io.github.mangi.eta.ui.components.EtaSwitchPreference
+import io.github.mangi.eta.ui.components.EtaTextButton
 import io.github.mangi.eta.ui.components.MiuixDialogActions
-import io.github.mangi.eta.ui.components.PreferenceIcon
 import io.github.mangi.eta.ui.components.StatusError
 import io.github.mangi.eta.ui.components.StatusSuccess
 import io.github.mangi.eta.ui.model.formatCompactTokenCount
@@ -75,25 +85,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Checkbox
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.CheckboxLocation
-import top.yukonga.miuix.kmp.preference.CheckboxPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.squircle.squircleSurface
-import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -226,14 +225,15 @@ internal fun ProviderModelsTab(
         ) {
             item(key = "actions", contentType = "section") {
                 ProviderSection(title = stringResource(R.string.ui_model_management_183414)) {
-                    ArrowPreference(
+                    EtaArrowPreference(
                         title = if (isFetching) context.getString(R.string.page_retrieving_a880c9) else context.getString(R.string.page_automatically_pull_from_remote_f883d0),
                         summary = stringResource(R.string.provider_models_endpoint_summary, provider.baseUrl),
                         enabled = !isFetching && !isMutatingModel,
                         startAction = {
-                            PreferenceIcon(
+                            EtaPreferenceIcon(
                                 icon = Icons.Rounded.CloudDownload,
                                 enabled = !isFetching && !isMutatingModel,
+                                tint = EtaPreferenceColors.Blue,
                             )
                         },
                         onClick = {
@@ -283,14 +283,15 @@ internal fun ProviderModelsTab(
                         },
                     )
 
-                    ArrowPreference(
+                    EtaArrowPreference(
                         title = stringResource(R.string.ui_add_custom_model_a5ddc0),
                         summary = stringResource(R.string.ui_manually_fill_in_the_display_name_and_model_id_077a7b),
                         enabled = !isFetching && !isMutatingModel,
                         startAction = {
-                            PreferenceIcon(
+                            EtaPreferenceIcon(
                                 icon = Icons.Rounded.Add,
                                 enabled = !isFetching && !isMutatingModel,
+                                tint = EtaPreferenceColors.Blue,
                             )
                         },
                         onClick = {
@@ -304,7 +305,7 @@ internal fun ProviderModelsTab(
                         },
                     )
                     message?.let {
-                        HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+                        EtaPreferenceDivider(hasLeading = false)
                         Text(
                             text = it,
                             style = MiuixTheme.textStyles.footnote2,
@@ -325,7 +326,7 @@ internal fun ProviderModelsTab(
                     label = stringResource(R.string.ui_search_model_df5586),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
+                        .padding(horizontal = 16.dp)
                         .padding(top = 12.dp, bottom = 8.dp),
                 )
             }
@@ -363,14 +364,14 @@ internal fun ProviderModelsTab(
                 }
             } else {
                 item(key = "models_title", contentType = "section_title") {
-                    SmallTitle(modelListTitle)
+                    EtaPreferenceGroupTitle(modelListTitle)
                 }
                 itemsIndexed(
                     items = filteredModels,
                     key = { _, model -> "model:${model.id}" },
                     contentType = { _, _ -> "model" },
                 ) { index, model ->
-                    ModelListGroupItem(
+                    EtaPreferenceGroupItem(
                         isFirst = index == 0,
                         isLast = index == filteredModels.lastIndex,
                     ) {
@@ -484,7 +485,7 @@ internal fun ProviderModelsTab(
     }
 
     modelPendingDelete?.let { model ->
-        OverlayDialog(
+        EtaOverlayDialog(
             show = true,
             title = stringResource(R.string.ui_delete_model_cf24da),
             summary = stringResource(R.string.provider_model_delete_summary, model.displayName),
@@ -522,7 +523,7 @@ internal fun ProviderModelsTab(
     }
 
     if (showBatchDeleteDialog) {
-        OverlayDialog(
+        EtaOverlayDialog(
             show = true,
             title = stringResource(R.string.ui_delete_model_cf24da),
             summary = pluralStringResource(
@@ -571,39 +572,6 @@ internal fun ProviderModelsTab(
     }
 }
 
-@Composable
-private fun ModelListGroupItem(
-    isFirst: Boolean,
-    isLast: Boolean,
-    content: @Composable () -> Unit,
-) {
-    val surfaceColor = MiuixTheme.colorScheme.surfaceContainer
-    val contentColor = MiuixTheme.colorScheme.onSurfaceContainer
-    val cornerRadius = CardDefaults.CornerRadius
-    val surfaceModifier = if (isFirst || isLast) {
-        Modifier.squircleSurface(
-            color = surfaceColor,
-            topStart = if (isFirst) cornerRadius else 0.dp,
-            topEnd = if (isFirst) cornerRadius else 0.dp,
-            bottomEnd = if (isLast) cornerRadius else 0.dp,
-            bottomStart = if (isLast) cornerRadius else 0.dp,
-        )
-    } else {
-        Modifier.background(surfaceColor)
-    }
-
-    CompositionLocalProvider(LocalContentColor provides contentColor) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp)
-                .then(surfaceModifier),
-        ) {
-            content()
-        }
-    }
-}
-
 /** 多选模式底部悬浮操作栏：退出在左，已选数量其次，全选与删除在右；删除沿用统一破坏性配色。 */
 @Composable
 private fun ModelSelectionBar(
@@ -615,12 +583,12 @@ private fun ModelSelectionBar(
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
-    Card(
+    EtaCard(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 12.dp),
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 16.dp),
     ) {
         Row(
             modifier = Modifier
@@ -645,12 +613,12 @@ private fun ModelSelectionBar(
                 style = MiuixTheme.textStyles.body2,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(
+            EtaTextButton(
                 text = if (selectedCount == totalCount) context.getString(R.string.page_select_none_ba20eb) else context.getString(R.string.page_select_all_3e44b2),
                 enabled = enabled,
                 onClick = onToggleAll,
             )
-            TextButton(
+            EtaTextButton(
                 text = stringResource(R.string.ui_delete_3755f5),
                 enabled = selectedCount > 0 && enabled,
                 colors = ButtonDefaults.textButtonColorsPrimary(
@@ -821,7 +789,7 @@ private fun ModelEditDialog(
         },
     )
 
-    OverlayDialog(
+    EtaOverlayDialog(
         show = true,
         title = if (isNew) context.getString(R.string.page_add_model_532a64) else context.getString(R.string.page_edit_model_29e31e),
         onDismissRequest = { if (!isSaving) onDismiss() },
@@ -885,7 +853,7 @@ private fun ModelEditDialog(
                         modifier = Modifier.weight(1f),
                     )
                     if (contextWindowOverrideText.isNotBlank()) {
-                        TextButton(
+                        EtaTextButton(
                             text = stringResource(R.string.ui_restore_automatic_8d4e1e),
                             enabled = !isSaving,
                             onClick = { contextWindowOverrideText = "" },
@@ -905,8 +873,8 @@ private fun ModelEditDialog(
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
                 )
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    SwitchPreference(
+                EtaPreferenceGroup(modifier = Modifier.fillMaxWidth()) {
+                    EtaSwitchPreference(
                         checked = reasoningEnabled,
                         onCheckedChange = { enabled ->
                             reasoningOverrideActive = true
@@ -927,8 +895,8 @@ private fun ModelEditDialog(
                         enabled = !isSaving,
                     )
                     if (reasoningEnabled) {
-                        HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
-                        CheckboxPreference(
+                        EtaPreferenceDivider(hasLeading = false)
+                        EtaCheckboxPreference(
                             title = ReasoningEffort.DEFAULT.displayName,
                             summary = stringResource(R.string.ui_determined_by_model_or_provider_06c326),
                             checked = true,
@@ -937,8 +905,8 @@ private fun ModelEditDialog(
                             enabled = false,
                         )
                         editableReasoningEfforts.forEach { effort ->
-                            HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
-                            CheckboxPreference(
+                            EtaPreferenceDivider(hasLeading = false)
+                            EtaCheckboxPreference(
                                 title = effort.displayName,
                                 summary = if (effort == ReasoningEffort.OFF) {
                                     context.getString(R.string.page_allow_thinking_to_be_turned_off_during_conversations_5a32a9)

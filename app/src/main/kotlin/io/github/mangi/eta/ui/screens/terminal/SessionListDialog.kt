@@ -1,7 +1,4 @@
 package io.github.mangi.eta.ui.screens.terminal
-import io.github.mangi.eta.R
-import androidx.compose.ui.res.stringResource
-
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,17 +11,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.terminal.TerminalEnvironment
 import io.github.mangi.eta.ui.app.displayName
+import io.github.mangi.eta.ui.components.EtaTextButton
+import io.github.mangi.eta.ui.components.EtaWindowDialog
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Immutable
 internal data class SessionDialogRow(
@@ -47,7 +46,7 @@ internal fun SessionListDialog(
     onClose: (String) -> Unit,
     onNew: () -> Unit,
 ) {
-    WindowDialog(
+    EtaWindowDialog(
         show = true,
         title = stringResource(R.string.terminal_sessions),
         onDismissRequest = onDismiss,
@@ -74,7 +73,7 @@ internal fun SessionListDialog(
                 }
             }
         }
-        TextButton(
+        EtaTextButton(
             text = stringResource(R.string.terminal_new_session),
             onClick = { onNew(); onDismiss() },
             modifier = Modifier
@@ -140,11 +139,11 @@ private fun SessionRow(
                 },
                 modifier = Modifier.weight(1f),
             )
-            TextButton(
+            EtaTextButton(
                 text = stringResource(R.string.terminal_restart_session),
                 onClick = onRestart,
             )
-            TextButton(
+            EtaTextButton(
                 text = stringResource(R.string.terminal_close_session),
                 onClick = onClose,
             )

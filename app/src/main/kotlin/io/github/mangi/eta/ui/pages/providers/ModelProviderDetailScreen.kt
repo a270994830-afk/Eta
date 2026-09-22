@@ -47,6 +47,13 @@ import io.github.mangi.eta.data.model.withId
 import io.github.mangi.eta.data.repository.ProviderRepository
 import io.github.mangi.eta.data.repository.RemoteModelFetcher
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
+import io.github.mangi.eta.ui.components.EtaCard
+import io.github.mangi.eta.ui.components.EtaOverlayDialog
+import io.github.mangi.eta.ui.components.EtaPreference
+import io.github.mangi.eta.ui.components.EtaPreferenceDivider
+import io.github.mangi.eta.ui.components.EtaSwitchPreference
+import io.github.mangi.eta.ui.components.EtaTextButton
+import io.github.mangi.eta.ui.components.EtaWindowSpinnerPreference
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixPageBottomSpacer
 import io.github.mangi.eta.ui.components.MiuixScaffold
@@ -58,21 +65,14 @@ import io.github.mangi.eta.ui.navigation.NewProviderType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
-import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.WindowSpinnerPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -125,7 +125,7 @@ internal fun ModelProviderDetailScreen(
                 ) {
                     Text(stringResource(R.string.ui_provider_does_not_exist_83cee6))
                     Spacer(modifier = Modifier.height(12.dp))
-                    TextButton(text = stringResource(R.string.ui_return_11d024), onClick = onBack)
+                    EtaTextButton(text = stringResource(R.string.ui_return_11d024), onClick = onBack)
                 }
             }
         }
@@ -271,8 +271,8 @@ private fun ProviderConfigTab(
                     }
                 }
                 if (provider !is AnthropicProviderSetting) {
-                    HorizontalDivider()
-                    WindowSpinnerPreference(
+                    EtaPreferenceDivider(hasLeading = false)
+                    EtaWindowSpinnerPreference(
                         items = listOf(
                             DropdownItem(text = "Chat Completions API"),
                             DropdownItem(text = "Responses API"),
@@ -297,8 +297,8 @@ private fun ProviderConfigTab(
                         },
                     )
                     if (draft.endpointMode == OpenAiEndpointMode.RESPONSES) {
-                        HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
-                        SwitchPreference(
+                        EtaPreferenceDivider(hasLeading = false)
+                        EtaSwitchPreference(
                             title = stringResource(R.string.ui_server_side_web_search_ddb8e0),
                             summary = stringResource(R.string.ui_allows_the_model_to_call_web_searches_provided_by_th_2f752f),
                             checked = draft.hostedWebSearchEnabled,
@@ -308,8 +308,8 @@ private fun ProviderConfigTab(
                         )
                     }
                 }
-                HorizontalDivider()
-                BasicComponent(
+                EtaPreferenceDivider(hasLeading = false)
+                EtaPreference(
                     title = stringResource(R.string.ui_test_connection_10b7d8),
                     summary = testStatus,
                     enabled = !isWorking,
@@ -317,7 +317,7 @@ private fun ProviderConfigTab(
                         val validationError = validateProviderDraft(context, draft)
                         if (validationError != null) {
                             testStatus = context.getString(R.string.provider_error, validationError)
-                            return@BasicComponent
+                            return@EtaPreference
                         }
                         scope.launch {
                             isWorking = true
@@ -356,12 +356,12 @@ private fun ProviderConfigTab(
 
         item(key = "preferences_and_prompt") {
             ProviderSection(title = stringResource(R.string.ui_preferences_and_strategies_2abd3c)) {
-                SwitchPreference(
+                EtaSwitchPreference(
                     title = stringResource(R.string.ui_enable_this_provider_683a76),
                     checked = draft.isEnabled,
                     onCheckedChange = { onDraftChange(draft.copy(isEnabled = it)) }
                 )
-                HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+                EtaPreferenceDivider(hasLeading = false)
                 Column(modifier = Modifier.padding(16.dp)) {
                     TextField(
                         value = draft.systemPrompt,
@@ -391,7 +391,7 @@ private fun ProviderConfigTab(
                     .padding(top = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                TextButton(
+                EtaTextButton(
                     text = when {
                         isWorking -> context.getString(R.string.page_saving_d70d42)
                         creationCommitted -> context.getString(R.string.page_created_62cfc5)
@@ -405,7 +405,7 @@ private fun ProviderConfigTab(
                         val validationError = validateProviderDraft(context, draft)
                         if (validationError != null) {
                             status = context.getString(R.string.provider_error, validationError)
-                            return@TextButton
+                            return@EtaTextButton
                         }
                         scope.launch {
                             isWorking = true
@@ -475,10 +475,10 @@ private fun ProviderConfigTab(
 
         if (!isNew) {
             item(key = "danger_zone") {
-                Card(
+                EtaCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
+                        .padding(horizontal = 16.dp)
                         .padding(top = 12.dp),
                     showIndication = true,
                     onClick = if (isWorking) {
@@ -512,7 +512,7 @@ private fun ProviderConfigTab(
     }
 
     if (showDeleteDialog) {
-        OverlayDialog(
+        EtaOverlayDialog(
             show = true,
             title = stringResource(R.string.ui_remove_provider_9f848f),
             summary = stringResource(R.string.provider_delete_summary, provider.name),
@@ -550,7 +550,7 @@ private fun ProviderConfigTab(
     }
 
     if (showResetDialog) {
-        OverlayDialog(
+        EtaOverlayDialog(
             show = true,
             title = stringResource(R.string.ui_reset_built_in_configuration_35b6ec),
             summary = stringResource(R.string.provider_reset_summary, provider.name),

@@ -22,10 +22,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.data.model.CustomProviderSetting
 import io.github.mangi.eta.data.model.ProviderSetting
-import io.github.mangi.eta.ui.components.PreferenceIcon
+import io.github.mangi.eta.ui.components.EtaPreferenceColors
+import io.github.mangi.eta.ui.components.EtaPreferenceGroup
+import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
+import io.github.mangi.eta.ui.components.EtaPreferenceIcon
 import io.github.mangi.eta.ui.components.providerBrandLogoRes as sharedProviderBrandLogoRes
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -38,9 +39,9 @@ internal fun ProviderSection(
 ) {
     Column(modifier = modifier) {
         if (title != null) {
-            SmallTitle(title)
+            EtaPreferenceGroupTitle(title)
         }
-        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        EtaPreferenceGroup(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             content()
         }
     }
@@ -66,7 +67,6 @@ private fun ProviderBrandImage(
         contentDescription = null,
         contentScale = ContentScale.Fit,
         modifier = modifier
-            .padding(end = 6.dp)
             .size(24.dp)
             .clip(CircleShape),
     )
@@ -93,13 +93,15 @@ internal fun ProviderIcon(
     }
 
     when (provider) {
-        is CustomProviderSetting -> PreferenceIcon(
+        is CustomProviderSetting -> EtaPreferenceIcon(
             icon = Icons.Rounded.Dns,
             modifier = modifier,
+            tint = EtaPreferenceColors.Blue,
         )
-        else -> PreferenceIcon(
+        else -> EtaPreferenceIcon(
             icon = Icons.Rounded.Language,
             modifier = modifier,
+            tint = EtaPreferenceColors.Blue,
         )
     }
 }

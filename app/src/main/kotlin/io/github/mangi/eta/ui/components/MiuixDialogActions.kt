@@ -7,10 +7,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 import io.github.mangi.eta.R
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 弹窗底部按钮行：取消在左、确认在右，平分整行。
@@ -40,13 +39,13 @@ fun MiuixDialogActions(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        TextButton(
+        EtaTextButton(
             text = cancelText ?: stringResource(R.string.action_cancel),
             onClick = onCancel,
             enabled = cancelEnabled,
             modifier = Modifier.weight(1f),
         )
-        TextButton(
+        EtaTextButton(
             text = confirmText,
             onClick = onConfirm,
             enabled = confirmEnabled,
