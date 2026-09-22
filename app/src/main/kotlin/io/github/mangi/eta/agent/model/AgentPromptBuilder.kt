@@ -127,7 +127,7 @@ internal object AgentPromptBuilder {
                             "当前终端只支持 identity=user，以 Eta 的 App UID 执行；Linux 内模拟 root 不授予 Android 特权。用户未指定环境的命令使用 terminal 的 environment=android、action=open_and_exec；"
                         }) +
                         "连续多步 shell 工作先 action=open 获取 session_id，再 action=exec 复用会话；" +
-                        "长时间命令使用 async=true 启动后用 read_async_result 轮询，完成后 close；" +
+                        "长时间命令使用 async=true 启动后用 read_async_result 轮询（节奏先密后疏：先 wait 3~5 秒连查两轮，未完成再逐步放大到 10/20/30 秒，别每轮都等满——命令通常几十秒内完成），完成后 close；" +
                         "需要长期驻留的后台服务（监听端口、Web 面板等）用 action=daemon_start 启动，daemon_list 查看状态、daemon_logs 读日志、daemon_stop 停止；" +
                         "守护任务不随 run 或会话结束回收，也不要用 nohup 或 & 手工后台化；" +
                         "async 后台命令是独立 shell，不要和 session_id 混用。不要调用 search_apps 查询“终端”或“Termux”。" +

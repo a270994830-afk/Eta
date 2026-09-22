@@ -174,7 +174,7 @@ internal object AgentTextSystemToolCatalog {
             .put(
                 AgentToolSchema.function(
                     name = "wait",
-                    description = "等待一段时间，让动画、网络加载或页面跳转完成。不要用它代替 wait_for_text/wait_for_package 的可验证等待。",
+                    description = "等待一段时间，让动画、网络加载或页面跳转完成。轮询后台任务时先短后长（wait 3~5 秒起步，未完成再逐步放大），别固定等满 30 秒。不要用它代替 wait_for_text/wait_for_package 的可验证等待。",
                     parameters = JSONObject()
                         .put("type", "object")
                         .put(
