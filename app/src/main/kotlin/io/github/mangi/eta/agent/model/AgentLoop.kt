@@ -95,7 +95,9 @@ internal class AgentLoop(
             toolCallValidator = AgentToolCallValidator(roundTools)
             publishTranscript()
             context.compact(roundTools)
-            var requestMessages = roleplayContext?.projectMessages(messages, roundTools) ?: messages
+            var requestMessages = AssistantScreenContextProjection.project(
+                roleplayContext?.projectMessages(messages, roundTools) ?: messages,
+            )
             var requestEstimate = AgentContextBudget.rawEstimate(requestMessages, roundTools)
             var roundInputTokens: Int? = null
             var overflowAttempts = 0
@@ -135,7 +137,9 @@ internal class AgentLoop(
                         overflowAttempts++
                         accumulatedReasoning.setLength(reasoningLengthBeforeRound)
                         context.compact(roundTools, force = true)
-                        requestMessages = roleplayContext?.projectMessages(messages, roundTools) ?: messages
+                        requestMessages = AssistantScreenContextProjection.project(
+                            roleplayContext?.projectMessages(messages, roundTools) ?: messages,
+                        )
                         requestEstimate = AgentContextBudget.rawEstimate(requestMessages, roundTools)
                         roundInputTokens = null
                         round++

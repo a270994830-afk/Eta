@@ -254,6 +254,7 @@ internal class AgentRuntimeRunExecutor(
                 },
                 capabilitiesProvider = { AgentToolCapabilities.capture(appContext) },
                 prompt = request.prompt,
+                assistantScreenContext = request.assistantScreenContext,
                 toolExecutor = runToolExecutor,
                 images = request.images,
                 history = request.history,
