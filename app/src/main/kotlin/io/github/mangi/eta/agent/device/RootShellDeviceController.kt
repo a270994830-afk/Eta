@@ -824,17 +824,37 @@ internal class RootShellDeviceController(
         )
     }
 
+    /** OCR 截图结果：位图 + 采集完整性，供调用方诊断「偶发大段漏识别」。 */
+    data class OcrCapture(
+        val bitmap: Bitmap,
+        val source: String,
+        val complete: Boolean,
+        val expectedWindows: Int,
+        val capturedWindows: Int,
+        val timedOut: Boolean,
+    )
+
     /**
      * OCR 专用：截取原始位图（优先无障碍、其次 root），调用方负责回收。
      */
-    fun captureBitmapForOcr(): Bitmap? {
+    fun captureBitmapForOcr(): OcrCapture? {
         val excludedPackages = screenshotExcludedPackages()
         val service = AgentAccessibilityService.current()
         if (service != null) {
-            val bitmap = runCatching {
-                service.captureScreenshotExcludingOverlays(excludedPackages).bitmap
+            val capture = runCatching {
+                service.captureScreenshotExcludingOverlays(excludedPackages)
             }.getOrNull()
-            if (bitmap != null) return bitmap
+            val bitmap = capture?.bitmap
+            if (capture != null && bitmap != null) {
+                return OcrCapture(
+                    bitmap = bitmap,
+                    source = "accessibility",
+                    complete = capture.complete,
+                    expectedWindows = capture.expectedWindows,
+                    capturedWindows = capture.capturedWindows,
+                    timedOut = capture.timedOut,
+                )
+            }
         }
         if (
             !rootAvailable() ||
@@ -847,7 +867,15 @@ internal class RootShellDeviceController(
         }
         val result = runSuBytes("screencap -p", timeoutSeconds = 8)
         if (result.exitCode != 0 || result.output.isEmpty()) return null
-        return BitmapFactory.decodeByteArray(result.output, 0, result.output.size)
+        val bitmap = BitmapFactory.decodeByteArray(result.output, 0, result.output.size) ?: return null
+        return OcrCapture(
+            bitmap = bitmap,
+            source = "root",
+            complete = true,
+            expectedWindows = 1,
+            capturedWindows = 1,
+            timedOut = false,
+        )
     }
 
     private fun dumpUiNodes(maxNodes: Int): List<UiNode> {

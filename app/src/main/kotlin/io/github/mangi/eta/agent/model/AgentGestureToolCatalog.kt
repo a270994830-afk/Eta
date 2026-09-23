@@ -26,7 +26,7 @@ internal object AgentGestureToolCatalog {
             .put(
                 AgentToolSchema.function(
                     name = "tap_text",
-                    description = "按文字直接点击屏幕上的元素，无需先 observe_screen。弹窗、对话框、音质/菜单选择等场景优先用本工具：自动在当前屏幕找包含该文字的元素并点击，文本匹配会忽略全角/半角括号与空格差异；目标本身不可点击时会自动点它所在的可点击区域或其中心坐标。同文字出现多个时用 ordinal 指定第几个（从 1 开始，默认第一个）。",
+                    description = "按文字直接点击屏幕上的元素，无需先 observe_screen。弹窗、对话框、音质/菜单选择等场景优先用本工具：自动在当前屏幕找包含该文字的元素并点击，文本匹配会忽略全角/半角括号与空格差异；目标本身不可点击时会自动点它所在的可点击区域或其中心坐标。同文字出现多个时用 ordinal 指定第几个（从 1 开始，默认第一个）。无障碍节点里找不到该文字时（如界面是图片/Canvas/自绘控件），会自动回退为截图 OCR 定位后点击，此时结果里 source=ocr。",
                     parameters = JSONObject()
                         .put("type", "object")
                         .put(

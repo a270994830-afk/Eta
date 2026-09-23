@@ -269,11 +269,19 @@ internal class AgentLocalTools(
     }
 
     private fun ocrScreen(): String {
-        val bitmap = deviceController.captureBitmapForOcr()
+        val capture = captureForOcr()
             ?: return errorResult("SCREENSHOT_UNAVAILABLE", "无法获取屏幕截图；请确认无障碍服务已开启")
+        val bitmap = capture.bitmap
         return try {
             val startedAt = SystemClock.elapsedRealtime()
             val lines = OnnxOcrEngine.recognize(context, bitmap)
+            if (!capture.complete) {
+                logger.warn(
+                    "Agent ocr_screen capture incomplete: source=${capture.source} " +
+                        "windows=${capture.capturedWindows}/${capture.expectedWindows} " +
+                        "timed_out=${capture.timedOut} lines=${lines.size}"
+                )
+            }
             val (screenWidth, screenHeight) = deviceController.screenDimensions()
             val space = RootShellDeviceController.CoordinateSpace(
                 screenWidth = screenWidth,
@@ -301,6 +309,14 @@ internal class AgentLocalTools(
                 .put("count", lines.size)
                 .put("lines", items)
                 .put("elapsed_ms", SystemClock.elapsedRealtime() - startedAt)
+                .put(
+                    "capture",
+                    JSONObject()
+                        .put("source", capture.source)
+                        .put("complete", capture.complete)
+                        .put("windows", "${capture.capturedWindows}/${capture.expectedWindows}")
+                        .put("timed_out", capture.timedOut),
+                )
                 .put("note", "坐标为屏幕像素；点击请用 tap 并设置 coordinate_space=screen")
                 .toString()
         } catch (failure: Throwable) {
@@ -309,6 +325,15 @@ internal class AgentLocalTools(
         } finally {
             bitmap.recycle()
         }
+    }
+
+    /** 截图供 OCR 使用；偶发部分截取（个别窗口失败/超时）时重截一次，减少大段漏识别。 */
+    private fun captureForOcr(): RootShellDeviceController.OcrCapture? {
+        val first = deviceController.captureBitmapForOcr() ?: return null
+        if (first.complete) return first
+        val retry = deviceController.captureBitmapForOcr() ?: return first
+        first.bitmap.recycle()
+        return retry
     }
 
     private fun terminalTool(block: () -> String): String {
@@ -783,9 +808,10 @@ internal class AgentLocalTools(
             ?: return errorResult("NO_OBSERVATION", "无法获取当前屏幕节点；请确认无障碍服务已开启")
         val matches = findTextMatches(elements.nodes, target)
         if (matches.isEmpty()) {
+            tapTextByOcr(target, ordinal)?.let { return it }
             return errorResult(
                 code = "ELEMENT_NOT_FOUND",
-                message = "当前屏幕未找到包含「$target」的元素；可先 observe_screen 确认界面，或改用 tap_element",
+                message = "当前屏幕未找到包含「$target」的元素，截图 OCR 回退也未找到；可先 observe_screen 确认界面，或改用 tap_element",
             )
         }
         val node = matches.getOrNull(ordinal - 1) ?: matches.first()
@@ -821,6 +847,66 @@ internal class AgentLocalTools(
             )
         }
         return result
+    }
+
+    /**
+     * 无障碍节点里找不到目标文字时的回退：截图 → 离线 OCR 定位 → 按屏幕坐标点击。
+     * 图片型界面、Canvas、自绘控件对无障碍不可见，但通常仍有可识别的文字。
+     * 返回 null 表示本次回退不可用（截图失败 / 未识别到 / 过程异常），由调用方给出原始错误。
+     */
+    private fun tapTextByOcr(target: String, ordinal: Int): String? {
+        val capture = captureForOcr() ?: return null
+        val bitmap = capture.bitmap
+        return try {
+            val needle = normalizeUiText(target)
+            val candidates = OnnxOcrEngine.recognize(context, bitmap)
+                .mapNotNull { line ->
+                    val haystack = normalizeUiText(line.text)
+                    val rank = when {
+                        haystack == needle -> 0
+                        haystack.contains(needle) -> 1
+                        else -> return@mapNotNull null
+                    }
+                    line to rank
+                }
+                .sortedWith(compareBy({ it.second }, { -it.first.score }))
+            val line = candidates.getOrNull(ordinal - 1)?.first ?: candidates.firstOrNull()?.first
+                ?: return null
+            val (screenWidth, screenHeight) = deviceController.screenDimensions()
+            val space = RootShellDeviceController.CoordinateSpace(
+                screenWidth = screenWidth,
+                screenHeight = screenHeight,
+                screenshotWidth = bitmap.width,
+                screenshotHeight = bitmap.height,
+            )
+            val point = space.fromScreenshot(
+                line.centerX.coerceIn(0, bitmap.width - 1),
+                line.centerY.coerceIn(0, bitmap.height - 1),
+            )
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+            val result = deviceController.tap(point.x, point.y, durationMs = 120)
+            if (!result.isOkJson()) {
+                return errorResult(
+                    code = "TAP_TEXT_FAILED",
+                    message = "OCR 回退点击「${line.text}」未成功；可先用 ocr_screen 拿坐标后手动 tap",
+                )
+            }
+            logger.info(
+                "Agent tap_text ocr fallback: text=${line.text} x=${point.x} y=${point.y} " +
+                    "score=${line.score} capture_complete=${capture.complete}"
+            )
+            runCatching { JSONObject(result) }.getOrElse { JSONObject() }
+                .put("source", "ocr")
+                .put("matched_text", line.text)
+                .put("x", point.x)
+                .put("y", point.y)
+                .toString()
+        } catch (failure: Throwable) {
+            logger.warn("Agent tap_text ocr fallback failed: type=${failure.javaClass.simpleName}")
+            null
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     /** 归一化后按文字匹配节点：完全相等优先，其次包含；每级内可点击的排前面。 */
