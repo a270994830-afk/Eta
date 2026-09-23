@@ -149,7 +149,14 @@ internal class AgentLocalTools(
         inspectedGitHubSnapshots.clear()
     }
 
-    override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
+    override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult {
+        val startedAt = SystemClock.elapsedRealtime()
+        val result = executeToolCall(toolCall)
+        logger.info("AgentPerf tool=${toolCall.name} ms=${SystemClock.elapsedRealtime() - startedAt}")
+        return result
+    }
+
+    private fun executeToolCall(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
         runCatching {
             val args = JSONObject(toolCall.argumentsJson.ifBlank { "{}" })
             if (AgentToolRequirements.find(toolCall.name) != null &&

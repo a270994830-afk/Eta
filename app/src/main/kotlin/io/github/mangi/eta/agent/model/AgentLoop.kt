@@ -1,9 +1,11 @@
 package io.github.mangi.eta.agent.model
 
+import android.os.SystemClock
 import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentRunController
 import io.github.mangi.eta.agent.runtime.AgentTokenUsage
 import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
+import io.github.mangi.eta.core.AndroidAgentLogger
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -86,6 +88,7 @@ internal class AgentLoop(
 
         while (true) {
             runController.throwIfCancelled()
+            val roundStartedAt = SystemClock.elapsedRealtime()
             if (purpose.allowsTools) appendPendingSteeringMessage()
 
             val roundTools = if (purpose.allowsTools) toolsForRound?.invoke() ?: tools else JSONArray()
@@ -149,6 +152,11 @@ internal class AgentLoop(
             )
             round = completedRound.round
             val providerResponse = completedRound.response
+            // 性能诊断：每个回合的模型耗时与上下文估算（logcat 关键字 AgentPerf，供定位“慢在哪一步”）。
+            AndroidAgentLogger.info(
+                "AgentPerf round=$round model_ms=${SystemClock.elapsedRealtime() - roundStartedAt} " +
+                    "tools=${roundTools.length()} est_tokens=$requestEstimate"
+            )
 
             runController.throwIfCancelled()
             val assistantMessage = providerResponse.assistantMessage
@@ -183,6 +191,7 @@ internal class AgentLoop(
             )
 
             if (toolCalls.isNotEmpty()) {
+                val toolsStartedAt = SystemClock.elapsedRealtime()
                 val outcomes = toolCalls.map { call ->
                     val outcome = when (providerResponse.stopReason) {
                         AssistantStopReason.TOOL_USE -> executeTool(round, call)
@@ -200,6 +209,10 @@ internal class AgentLoop(
                     outcome
                 }
                 appendToolImages(round, outcomes)
+                AndroidAgentLogger.info(
+                    "AgentPerf round=$round tool_batch_ms=${SystemClock.elapsedRealtime() - toolsStartedAt} " +
+                        "calls=${toolCalls.size} names=${toolCalls.joinToString(",") { it.name }}"
+                )
                 publishTranscript()
                 round += 1
                 continue
