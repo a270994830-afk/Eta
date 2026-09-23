@@ -426,6 +426,7 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
     private fun submitPrompt(prompt: String) {
         val normalized = prompt.trim()
         if (normalized.isBlank()) return
+        EtaSpeechAnnouncer.stop()
         // 任务进行中：识别插队指令；否则默认排队。
         if (activeRunId != null) {
             val preempted = preemptTarget(normalized)
@@ -498,6 +499,9 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                 }
                 if (result.ok) {
                     lastResultContent = result.content
+                    if (voiceSessionMode && Prefs.isEnabled(Prefs.Keys.ETA_TTS_ENABLED)) {
+                        EtaSpeechAnnouncer.speak(applicationContext, result.content)
+                    }
                     uiState = uiState.copy(
                         phase = EtaVoicePhase.READY,
                         status = EtaVoiceStatus.Completed,

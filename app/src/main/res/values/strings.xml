@@ -1214,7 +1214,7 @@
   <string name="schedule_prompt_hint">Task to run automatically at that time</string>
   <string name="schedule_invalid">Time must be in HH:MM format, e.g. 19:55</string>
   <string name="schedule_prompt_required">Task content is required</string>
-  <string name="schedule_saved">Scheduled task saved</string>
+  <string name="schedule_saved">Saved. First run %1$s</string>
   <string name="schedule_max_reached">At most 8 scheduled tasks</string>
   <string name="schedule_paused_prefix">Paused · </string>
   <string name="schedule_exact_title">Allow alarms and reminders</string>
@@ -1232,4 +1232,8 @@
   <string name="schedule_pending_title">Scheduled task pending</string>
   <string name="schedule_pending_text">%1$s task could not auto-start; tap Run now</string>
   <string name="schedule_start_failed">%1$s task failed to start</string>
+  <string name="settings_tts_title">Speak voice replies</string>
+  <string name="settings_tts_summary">Read finished replies aloud for voice sessions; off by default</string>
+  <string name="schedule_try_run">Run this task once now</string>
+  <string name="schedule_try_started">Test run started; result will arrive as a notification</string>
 </resources>

@@ -3,6 +3,7 @@ package io.github.mangi.eta.agent.schedule
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import io.github.mangi.eta.core.AndroidAgentLogger
 
 /**
  * 定时任务触发入口：闹钟到点自动运行；通知「立即运行」由用户点按后运行；设备重启后重排全部闹钟。
@@ -21,6 +22,7 @@ class EtaScheduleReceiver : BroadcastReceiver() {
     private fun handleTrigger(context: Context, intent: Intent) {
         val task = findTask(context, intent) ?: return
         if (!task.enabled) return
+        AndroidAgentLogger.info("Schedule triggered: id=${task.id.take(8)}")
         EtaScheduleScheduler.scheduleNext(context, task)
         EtaScheduleService.start(context, task, userInitiated = false)
     }

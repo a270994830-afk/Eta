@@ -1183,7 +1183,7 @@
   <string name="schedule_prompt_hint">任務內容（到點自動執行）</string>
   <string name="schedule_invalid">時間格式應為 HH:MM，如 19:55</string>
   <string name="schedule_prompt_required">任務內容不能為空</string>
-  <string name="schedule_saved">定時任務已儲存</string>
+  <string name="schedule_saved">已儲存，將於 %1$s 首次執行</string>
   <string name="schedule_max_reached">最多新增 8 個定時任務</string>
   <string name="schedule_paused_prefix">已停用 · </string>
   <string name="schedule_exact_title">允許「鬧鐘與提醒」</string>
@@ -1201,4 +1201,8 @@
   <string name="schedule_pending_title">定時任務待執行</string>
   <string name="schedule_pending_text">%1$s 的任務未能自動啟動，點按「立即執行」</string>
   <string name="schedule_start_failed">%1$s 的任務啟動失敗</string>
+  <string name="settings_tts_title">語音播報回覆</string>
+  <string name="settings_tts_summary">語音入口的任務完成後朗讀回覆內容；預設關閉</string>
+  <string name="schedule_try_run">立即試跑一次</string>
+  <string name="schedule_try_started">試跑已開始，結果會以通知匯報</string>
 </resources>

@@ -5,6 +5,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import io.github.mangi.eta.core.AndroidAgentLogger
+import io.github.mangi.eta.core.safeLogType
 import java.util.Calendar
 
 /** 为每个启用的定时任务排布下一次闹钟；触发、重启、增删改与 App 启动时都会重排。 */
@@ -26,6 +28,8 @@ internal object EtaScheduleScheduler {
             } else {
                 alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent(context, task))
             }
+        }.onFailure { failure ->
+            AndroidAgentLogger.warn("Schedule alarm failed: type=${failure.safeLogType()}")
         }
     }
 

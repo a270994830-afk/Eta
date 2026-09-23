@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.AccessibilityNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AccountTree
@@ -70,6 +71,7 @@ import io.github.mangi.eta.agent.accessibility.AccessibilityProtectionClient
 import io.github.mangi.eta.agent.accessibility.AgentAccessibilityService
 import io.github.mangi.eta.agent.reminder.EtaReminderScheduler
 import io.github.mangi.eta.agent.schedule.EtaScheduleScheduler
+import io.github.mangi.eta.agent.schedule.EtaScheduleService
 import io.github.mangi.eta.agent.schedule.EtaScheduleStore
 import io.github.mangi.eta.agent.voice.EtaHotwordService
 import io.github.mangi.eta.config.PowerAssistantTarget
@@ -90,11 +92,13 @@ import io.github.mangi.eta.ui.components.EtaPreferenceGroup
 import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
 import io.github.mangi.eta.ui.components.EtaPreferenceIcon
 import io.github.mangi.eta.ui.components.EtaSwitchPreference
+import io.github.mangi.eta.ui.components.EtaTextButton
 import io.github.mangi.eta.ui.components.EtaWindowDialog
 import io.github.mangi.eta.ui.components.LanguagePreference
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
 import io.github.mangi.eta.ui.navigation.AppRoute
+import java.util.Calendar
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -176,6 +180,8 @@ private fun SettingsPageContent(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    val requestExecutionNotifications = rememberExecutionNotificationRequest()
+
     fun openScheduleEditor(task: EtaScheduleStore.Task?) {
         editingScheduleTask = task
         scheduleTimeInput = task?.let { "%02d:%02d".format(it.hour, it.minute) } ?: ""
@@ -221,7 +227,25 @@ private fun SettingsPageContent(
         EtaScheduleScheduler.sync(context.applicationContext)
         scheduleTasks = updated
         showScheduleDialog = false
-        Toast.makeText(context.applicationContext, context.getString(R.string.schedule_saved), Toast.LENGTH_SHORT).show()
+        requestExecutionNotifications()
+        val target = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, parsed.first)
+            set(Calendar.MINUTE, parsed.second)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+        }
+        val nextLabel = "%02d-%02d %02d:%02d".format(
+            target.get(Calendar.MONTH) + 1,
+            target.get(Calendar.DAY_OF_MONTH),
+            parsed.first,
+            parsed.second,
+        )
+        Toast.makeText(
+            context.applicationContext,
+            context.getString(R.string.schedule_saved, nextLabel),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 
     fun toggleScheduleTask(task: EtaScheduleStore.Task) {
@@ -260,7 +284,6 @@ private fun SettingsPageContent(
     // LSPosed 数据库）；未就绪时保持 null，UI 禁止修改。
     var prefs by remember { mutableStateOf(Prefs.remotePreferencesForUi(EtaApp.serviceInstance)) }
     val agentPrefs = remember { Prefs.localAgentPreferences() }
-    val requestExecutionNotifications = rememberExecutionNotificationRequest()
     // 本地开关（不依赖 LSPosed）：语音唤醒启停；配送提醒重排闹钟并在开启时请求通知权限。
     DisposableEffect(agentPrefs) {
         val targetPrefs = agentPrefs ?: return@DisposableEffect onDispose {}
@@ -615,6 +638,16 @@ private fun SettingsPageContent(
                         key = Prefs.Keys.ETA_VOICE_CONTINUOUS,
                         icon = Icons.Rounded.Sync,
                         iconTint = EtaPreferenceColors.Green,
+                    )
+                    EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.settings_tts_title),
+                        summary = stringResource(R.string.settings_tts_summary),
+                        key = Prefs.Keys.ETA_TTS_ENABLED,
+                        icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                        iconTint = EtaPreferenceColors.Orange,
                     )
                     if (prefs != null || hasConnectedFramework) {
                         EtaPreferenceDivider()
@@ -992,6 +1025,25 @@ private fun SettingsPageContent(
                         text = message,
                         color = MiuixTheme.colorScheme.error,
                         fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    )
+                }
+                if (editingScheduleTask != null) {
+                    EtaTextButton(
+                        text = stringResource(R.string.schedule_try_run),
+                        onClick = {
+                            val task = editingScheduleTask
+                            if (task != null) {
+                                requestExecutionNotifications()
+                                EtaScheduleService.start(context.applicationContext, task, userInitiated = true)
+                                Toast.makeText(
+                                    context.applicationContext,
+                                    context.getString(R.string.schedule_try_started),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                            showScheduleDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 MiuixDialogActions(

@@ -47,6 +47,7 @@ internal object Prefs {
         const val ETA_HOTWORD_ENABLED = "eta_hotword_enabled"
         const val ETA_HOTWORD_KEYWORD = "eta_hotword_keyword"
         const val ETA_VOICE_CONTINUOUS = "eta_voice_continuous"
+        const val ETA_TTS_ENABLED = "eta_tts_enabled"
         const val ETA_REMINDER_KAIGONG = "eta_reminder_kaigong"
         const val ETA_REMINDER_WINDOW = "eta_reminder_window"
 
@@ -69,6 +70,7 @@ internal object Prefs {
             AGENT_THINKING_ENABLED to true,
             ETA_HOTWORD_ENABLED to false,
             ETA_VOICE_CONTINUOUS to false,
+            ETA_TTS_ENABLED to false,
             ETA_REMINDER_KAIGONG to false,
             ETA_REMINDER_WINDOW to false,
         )
@@ -83,6 +85,7 @@ internal object Prefs {
             AGENT_THINKING_ENABLED,
             ETA_HOTWORD_ENABLED,
             ETA_VOICE_CONTINUOUS,
+            ETA_TTS_ENABLED,
             ETA_REMINDER_KAIGONG,
             ETA_REMINDER_WINDOW,
         )

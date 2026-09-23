@@ -53,8 +53,11 @@ class EtaScheduleService : Service() {
         }
         val taskId = intent?.getStringExtra(EtaScheduleReceiver.EXTRA_TASK_ID)
         val task = taskId?.let { id -> EtaScheduleStore.load(this).firstOrNull { it.id == id } }
-        if (task == null || runJob != null) {
+        if (task == null) {
             stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        if (runJob != null) {
             return START_NOT_STICKY
         }
         startForeground(NOTIFICATION_ID, progressNotification(task), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
@@ -63,6 +66,7 @@ class EtaScheduleService : Service() {
     }
 
     private fun execute(task: EtaScheduleStore.Task) {
+        AndroidAgentLogger.info("Scheduled task started: id=${task.id.take(8)}")
         var result: AgentRuntimeWire.RunResult? = null
         var error: String? = null
         try {
