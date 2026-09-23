@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import io.github.mangi.eta.agent.reminder.DeliveryToolboxBootstrap
 import io.github.mangi.eta.agent.reminder.EtaReminderScheduler
+import io.github.mangi.eta.agent.schedule.EtaScheduleScheduler
 import io.github.mangi.eta.agent.skill.SkillRuntime
 import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.terminal.TerminalRuntime
@@ -66,6 +67,7 @@ class EtaApp : Application(), XposedServiceHelper.OnServiceListener {
         }
         runCatching { EtaQuickActionShortcuts.publish(this) }
         EtaReminderScheduler.sync(this)
+        EtaScheduleScheduler.sync(this)
         XposedServiceHelper.registerListener(this)
         applicationScope.launch {
             LinuxEnvironmentSettingsRepository.initialize(this@EtaApp)

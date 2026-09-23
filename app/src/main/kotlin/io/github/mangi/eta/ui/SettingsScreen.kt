@@ -1,17 +1,23 @@
 package io.github.mangi.eta.ui
 
+import android.app.AlarmManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AccessibilityNew
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.GppMaybe
@@ -25,6 +31,8 @@ import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Schedule
@@ -47,9 +55,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -58,6 +69,8 @@ import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.accessibility.AccessibilityProtectionClient
 import io.github.mangi.eta.agent.accessibility.AgentAccessibilityService
 import io.github.mangi.eta.agent.reminder.EtaReminderScheduler
+import io.github.mangi.eta.agent.schedule.EtaScheduleScheduler
+import io.github.mangi.eta.agent.schedule.EtaScheduleStore
 import io.github.mangi.eta.agent.voice.EtaHotwordService
 import io.github.mangi.eta.config.PowerAssistantTarget
 import io.github.mangi.eta.config.Prefs
@@ -82,11 +95,15 @@ import io.github.mangi.eta.ui.components.LanguagePreference
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
 import io.github.mangi.eta.ui.navigation.AppRoute
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -117,6 +134,13 @@ private fun SettingsPageContent(
     var hasUsedSystemizer by remember { mutableStateOf(enhancementHistory.hasUsedSystemizer) }
     var showSystemizerDialog by remember { mutableStateOf(false) }
     var installingSystemizer by remember { mutableStateOf(false) }
+    var showScheduleDialog by remember { mutableStateOf(false) }
+    var editingScheduleTask by remember { mutableStateOf<EtaScheduleStore.Task?>(null) }
+    var scheduleTimeInput by remember { mutableStateOf("") }
+    var schedulePromptInput by remember { mutableStateOf("") }
+    var scheduleDialogError by remember { mutableStateOf<String?>(null) }
+    var scheduleTasks by remember { mutableStateOf(EtaScheduleStore.load(context.applicationContext)) }
+    var exactAlarmAllowed by remember { mutableStateOf(canScheduleExactAlarms(context)) }
 
     // 悬浮窗权限状态：授权后从系统设置返回时（ON_RESUME）刷新。
     var overlayGranted by remember {
@@ -145,10 +169,75 @@ private fun SettingsPageContent(
                 accessibilityGranted = isAgentAccessibilityEnabled(context)
                 accessibilityProtectionEnabled =
                     AccessibilityProtectionClient.isEnabled(context)
+                exactAlarmAllowed = canScheduleExactAlarms(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun openScheduleEditor(task: EtaScheduleStore.Task?) {
+        editingScheduleTask = task
+        scheduleTimeInput = task?.let { "%02d:%02d".format(it.hour, it.minute) } ?: ""
+        schedulePromptInput = task?.prompt ?: ""
+        scheduleDialogError = null
+        showScheduleDialog = true
+    }
+
+    fun commitScheduleTask() {
+        val parsed = parseScheduleTime(scheduleTimeInput)
+        if (parsed == null) {
+            scheduleDialogError = context.getString(R.string.schedule_invalid)
+            return
+        }
+        val prompt = schedulePromptInput.trim().take(EtaScheduleStore.MAX_PROMPT_CHARS)
+        if (prompt.isEmpty()) {
+            scheduleDialogError = context.getString(R.string.schedule_prompt_required)
+            return
+        }
+        val current = EtaScheduleStore.load(context.applicationContext)
+        val editing = editingScheduleTask
+        val updated = if (editing == null) {
+            if (current.size >= EtaScheduleStore.MAX_TASKS) {
+                scheduleDialogError = context.getString(R.string.schedule_max_reached)
+                return
+            }
+            current + EtaScheduleStore.Task(
+                id = UUID.randomUUID().toString(),
+                hour = parsed.first,
+                minute = parsed.second,
+                prompt = prompt,
+            )
+        } else {
+            current.map { task ->
+                if (task.id == editing.id) {
+                    task.copy(hour = parsed.first, minute = parsed.second, prompt = prompt)
+                } else {
+                    task
+                }
+            }
+        }
+        EtaScheduleStore.save(context.applicationContext, updated)
+        EtaScheduleScheduler.sync(context.applicationContext)
+        scheduleTasks = updated
+        showScheduleDialog = false
+        Toast.makeText(context.applicationContext, context.getString(R.string.schedule_saved), Toast.LENGTH_SHORT).show()
+    }
+
+    fun toggleScheduleTask(task: EtaScheduleStore.Task) {
+        val updated = EtaScheduleStore.load(context.applicationContext).map { item ->
+            if (item.id == task.id) item.copy(enabled = !item.enabled) else item
+        }
+        EtaScheduleStore.save(context.applicationContext, updated)
+        EtaScheduleScheduler.sync(context.applicationContext)
+        scheduleTasks = updated
+    }
+
+    fun deleteScheduleTask(task: EtaScheduleStore.Task) {
+        val updated = EtaScheduleStore.load(context.applicationContext).filterNot { it.id == task.id }
+        EtaScheduleStore.save(context.applicationContext, updated)
+        EtaScheduleScheduler.cancel(context.applicationContext, task)
+        scheduleTasks = updated
     }
 
     // Provider / Model 选中状态展示
@@ -422,6 +511,74 @@ private fun SettingsPageContent(
                         icon = Icons.Rounded.Schedule,
                         iconTint = EtaPreferenceColors.Blue,
                     )
+                }
+            }
+
+            // ── 定时任务（到点自动执行） ──────────────────────────────
+            item(key = "schedule_tasks") {
+                EtaPreferenceGroupTitle(stringResource(R.string.schedule_section_title))
+                EtaPreferenceGroup {
+                    scheduleTasks.forEach { task ->
+                        val timeLabel = "%02d:%02d".format(task.hour, task.minute)
+                        val preview = task.prompt.lineSequence().first().take(24)
+                        EtaArrowPreference(
+                            title = if (task.enabled) "$timeLabel · $preview" else timeLabel + " · " + stringResource(R.string.schedule_paused_prefix) + preview,
+                            summary = task.prompt.lineSequence().first().take(60),
+                            startAction = {
+                                EtaPreferenceIcon(
+                                    icon = Icons.Rounded.Schedule,
+                                    tint = if (task.enabled) EtaPreferenceColors.Green else EtaPreferenceColors.Blue,
+                                )
+                            },
+                            endActions = {
+                                IconButton(
+                                    onClick = { toggleScheduleTask(task) },
+                                    minWidth = 36.dp,
+                                    minHeight = 36.dp,
+                                ) {
+                                    Icon(
+                                        imageVector = if (task.enabled) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        contentDescription = null,
+                                        tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { deleteScheduleTask(task) },
+                                    minWidth = 36.dp,
+                                    minHeight = 36.dp,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Delete,
+                                        contentDescription = null,
+                                        tint = MiuixTheme.colorScheme.error,
+                                    )
+                                }
+                            },
+                            onClick = { openScheduleEditor(task) },
+                        )
+                        EtaPreferenceDivider()
+                    }
+                    EtaArrowPreference(
+                        title = stringResource(R.string.schedule_add),
+                        startAction = { EtaPreferenceIcon(Icons.Rounded.Add, tint = EtaPreferenceColors.Blue) },
+                        onClick = { openScheduleEditor(null) },
+                    )
+                    if (!exactAlarmAllowed) {
+                        EtaPreferenceDivider()
+                        EtaArrowPreference(
+                            title = stringResource(R.string.schedule_exact_title),
+                            summary = stringResource(R.string.schedule_exact_summary),
+                            startAction = { EtaPreferenceIcon(Icons.Rounded.Schedule, tint = EtaPreferenceColors.Orange) },
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                    )
+                                }
+                            },
+                        )
+                    }
                 }
             }
 
@@ -806,6 +963,45 @@ private fun SettingsPageContent(
             }
         }
 
+        EtaWindowDialog(
+            show = showScheduleDialog,
+            title = stringResource(
+                if (editingScheduleTask == null) R.string.schedule_add else R.string.schedule_edit_title,
+            ),
+            onDismissRequest = { showScheduleDialog = false },
+        ) {
+            Column {
+                TextField(
+                    value = scheduleTimeInput,
+                    onValueChange = { scheduleTimeInput = it },
+                    label = stringResource(R.string.schedule_time_hint),
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextField(
+                    value = schedulePromptInput,
+                    onValueChange = { schedulePromptInput = it.take(EtaScheduleStore.MAX_PROMPT_CHARS) },
+                    label = stringResource(R.string.schedule_prompt_hint),
+                    useLabelAsPlaceholder = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                scheduleDialogError?.let { message ->
+                    Text(
+                        text = message,
+                        color = MiuixTheme.colorScheme.error,
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    )
+                }
+                MiuixDialogActions(
+                    confirmText = stringResource(R.string.action_save),
+                    onCancel = { showScheduleDialog = false },
+                    onConfirm = { commitScheduleTask() },
+                )
+            }
+        }
+
         SystemizerConfirmDialog(
             show = showSystemizerDialog,
             installing = installingSystemizer,
@@ -868,6 +1064,14 @@ private fun SystemizerConfirmDialog(
         )
     }
 }
+
+private fun parseScheduleTime(value: String): Pair<Int, Int>? {
+    val match = Regex("^([01]?\\d|2[0-3]):([0-5]?\\d)$").find(value.trim()) ?: return null
+    return match.groupValues[1].toInt() to match.groupValues[2].toInt()
+}
+
+private fun canScheduleExactAlarms(context: Context): Boolean =
+    context.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() ?: false
 
 // ── 带图标的布尔开关 ─────────────────────────────────────────────────────────
 

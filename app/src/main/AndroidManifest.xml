@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
@@ -165,6 +166,25 @@
                 <action android:name="io.github.mangi.eta.agent.reminder.ACTION_WINDOW" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".agent.schedule.EtaScheduleReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="io.github.mangi.eta.agent.schedule.ACTION_TRIGGER" />
+                <action android:name="io.github.mangi.eta.agent.schedule.ACTION_RUN_NOW" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".agent.schedule.EtaScheduleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Scheduled background agent tasks" />
+        </service>
 
         <service
             android:name=".agent.runtime.AgentRuntimeService"
