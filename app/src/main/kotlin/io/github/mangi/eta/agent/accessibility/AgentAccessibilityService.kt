@@ -1123,14 +1123,32 @@ class AgentAccessibilityService : AccessibilityService() {
         }
         val failureCodes = synchronized(lock) { failures.toMap() }
         val complete = completed && missingIds.isEmpty() && merged != null
+        // 「抓到了窗口但内容是黑的」多发生在切屏动画/首帧未渲染等瞬间；标出来，让上层决定重试。
+        val blankWindowIds = if (merged == null) {
+            emptyList()
+        } else {
+            captured
+                .filterValues { (bitmap, _) -> !bitmap.isRecycled && bitmap.isMostlyBlack() }
+                .keys
+                .toList()
+        }
+        val blankCritical = blankWindowIds.any(criticalWindowIds::contains)
         AndroidAgentLogger.debug {
             "Agent accessibility action=capture_screenshot outcome=merged " +
                 "allWindows=${allWindows.size} validWindows=${captureWindows.size} " +
                 "excludedPackages=${excludedPackages.size} " +
                 "completed=$completed screenshots=${captured.size} " +
                 "complete=$complete criticalMissing=$criticalWindowMissing " +
+                "blank=${blankWindowIds.size} blankCritical=$blankCritical " +
                 "screen=${screenW}x${screenH} merged=${merged?.width}x${merged?.height} " +
                 "elapsed_ms=${SystemClock.elapsedRealtime() - startedAt}"
+        }
+        if (blankCritical) {
+            AndroidAgentLogger.warn(
+                "Agent accessibility action=capture_screenshot outcome=blank_critical " +
+                    "blankWindows=${blankWindowIds.size} criticalWindows=${criticalWindowIds.size} " +
+                    "complete=$complete elapsed_ms=${SystemClock.elapsedRealtime() - startedAt}"
+            )
         }
         captured.values.forEach { (bitmap, _) ->
             if (!bitmap.isRecycled) bitmap.recycle()
@@ -1145,6 +1163,8 @@ class AgentAccessibilityService : AccessibilityService() {
             failureCodes = failureCodes,
             timedOut = !completed,
             criticalWindowMissing = criticalWindowMissing,
+            blankWindowIds = blankWindowIds,
+            blankCritical = blankCritical,
         )
     }
 
@@ -1200,6 +1220,30 @@ class AgentAccessibilityService : AccessibilityService() {
             merged?.takeUnless(Bitmap::isRecycled)?.recycle()
             null
         }
+    }
+
+    /** 采样判断窗口位图是否几乎全黑：「抓到了但没画面」的黑帧。 */
+    private fun Bitmap.isMostlyBlack(): Boolean {
+        if (width <= 0 || height <= 0) return false
+        val stepX = (width / BLACK_FRAME_SAMPLE_SIDE).coerceAtLeast(1)
+        val stepY = (height / BLACK_FRAME_SAMPLE_SIDE).coerceAtLeast(1)
+        var bright = 0
+        var total = 0
+        var y = 0
+        while (y < height) {
+            var x = 0
+            while (x < width) {
+                val color = getPixel(x, y)
+                val luma = (((color shr 16) and 0xFF) * 299 +
+                    ((color shr 8) and 0xFF) * 587 +
+                    (color and 0xFF) * 114) / 1000
+                if (luma > BLACK_FRAME_LUMA) bright++
+                total++
+                x += stepX
+            }
+            y += stepY
+        }
+        return total > 0 && bright * 200 <= total
     }
 
     private fun setNodeText(
@@ -1961,6 +2005,10 @@ class AgentAccessibilityService : AccessibilityService() {
         val failureCodes: Map<Int, Int>,
         val timedOut: Boolean,
         val criticalWindowMissing: Boolean,
+        /** 抓到了但内容几乎全黑的窗口 id（切屏动画/首帧未渲染等黑帧）。 */
+        val blankWindowIds: List<Int> = emptyList(),
+        /** 关键窗口（顶层应用/活动/焦点）抓到黑帧：本帧不可信，调用方应重试。 */
+        val blankCritical: Boolean = false,
     ) {
         val partial: Boolean get() = bitmap != null && !complete
 
@@ -2298,6 +2346,9 @@ class AgentAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val CLIP_LABEL = "eta_agent"
+        /** 黑帧判定：采样 64×64 网格，亮度高于阈值的采样占比 ≤0.5% 视为「没画面」。 */
+        private const val BLACK_FRAME_SAMPLE_SIDE = 64
+        private const val BLACK_FRAME_LUMA = 24
         private const val WINDOW_POLL_FALLBACK_MS = 80L
         private const val MAX_UI_TREE_DEPTH = 24
         private const val UI_TREE_VISIT_MULTIPLIER = 8

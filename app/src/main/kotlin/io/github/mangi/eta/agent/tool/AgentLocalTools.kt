@@ -269,7 +269,7 @@ internal class AgentLocalTools(
     }
 
     private fun ocrScreen(): String {
-        val capture = captureForOcr()
+        val capture = deviceController.captureBitmapForOcr()
             ?: return errorResult("SCREENSHOT_UNAVAILABLE", "无法获取屏幕截图；请确认无障碍服务已开启")
         val bitmap = capture.bitmap
         return try {
@@ -315,7 +315,9 @@ internal class AgentLocalTools(
                         .put("source", capture.source)
                         .put("complete", capture.complete)
                         .put("windows", "${capture.capturedWindows}/${capture.expectedWindows}")
-                        .put("timed_out", capture.timedOut),
+                        .put("timed_out", capture.timedOut)
+                        .put("blank", capture.blank)
+                        .put("blank_retries", capture.blankRetries),
                 )
                 .put("note", "坐标为屏幕像素；点击请用 tap 并设置 coordinate_space=screen")
                 .toString()
@@ -325,15 +327,6 @@ internal class AgentLocalTools(
         } finally {
             bitmap.recycle()
         }
-    }
-
-    /** 截图供 OCR 使用；偶发部分截取（个别窗口失败/超时）时重截一次，减少大段漏识别。 */
-    private fun captureForOcr(): RootShellDeviceController.OcrCapture? {
-        val first = deviceController.captureBitmapForOcr() ?: return null
-        if (first.complete) return first
-        val retry = deviceController.captureBitmapForOcr() ?: return first
-        first.bitmap.recycle()
-        return retry
     }
 
     private fun terminalTool(block: () -> String): String {
@@ -855,7 +848,7 @@ internal class AgentLocalTools(
      * 返回 null 表示本次回退不可用（截图失败 / 未识别到 / 过程异常），由调用方给出原始错误。
      */
     private fun tapTextByOcr(target: String, ordinal: Int): String? {
-        val capture = captureForOcr() ?: return null
+        val capture = deviceController.captureBitmapForOcr() ?: return null
         val bitmap = capture.bitmap
         return try {
             val needle = normalizeUiText(target)

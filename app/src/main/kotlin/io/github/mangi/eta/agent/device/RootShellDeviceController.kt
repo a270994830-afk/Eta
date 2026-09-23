@@ -11,6 +11,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
+import android.os.Looper
 import android.os.SystemClock
 import java.io.IOException
 import java.io.BufferedReader
@@ -23,6 +24,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
+
+/** 黑帧重截前的等待（毫秒）：等切屏动画/首帧渲染结束。 */
+private const val BLANK_FRAME_RETRY_DELAY_MS = 300L
+/** observe 截图路径的黑帧重试次数（交互路径，只重一次）。 */
+private const val SCREENSHOT_BLANK_RETRIES = 1
+/** OCR 截图路径的黑帧/部分截取重试次数（离线识别多试一次更划算）。 */
+private const val OCR_CAPTURE_RETRIES = 2
 
 internal class RootShellDeviceController(
     private val logger: AgentLogger,
@@ -707,6 +715,20 @@ internal class RootShellDeviceController(
         return inputCommand(command, "open_system_panel")
     }
 
+    /** 排除项为空且 root 可用时才允许整屏截图兜底（否则宁可无图，也不把 Eta 自己的浮窗拍给模型）。 */
+    private fun canFallbackToRoot(excludedPackages: Set<String>): Boolean =
+        rootAvailable() && ScreenshotOutcomePolicy.mayFallbackToRoot(
+            excludedPackagesPresent = excludedPackages.isNotEmpty(),
+            criticalWindowMissing = false,
+        )
+
+    /** 黑帧重截前的等待：主线程上不等待，避免卡 UI。 */
+    private fun sleepForBlankRetry() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            runCatching { Thread.sleep(BLANK_FRAME_RETRY_DELAY_MS) }
+        }
+    }
+
     private fun captureScreenshot(): ScreenCapture {
         val excludedPackages = screenshotExcludedPackages()
         // 优先用无障碍截图：takeScreenshotOfWindow 逐窗口过滤 TYPE_ACCESSIBILITY_OVERLAY，
@@ -714,11 +736,34 @@ internal class RootShellDeviceController(
         val service = AgentAccessibilityService.current()
         if (service != null) {
             val captureStartedAt = SystemClock.elapsedRealtime()
-            val result = runCatching {
+            var result = runCatching {
                 service.captureScreenshotExcludingOverlays(excludedPackages)
             }.getOrNull()
-            val bitmap = result?.bitmap
-            if (bitmap != null) {
+            // 黑帧（关键窗口抓到但没画面）重截通常就恢复；仍黑且允许 root 时改用整屏截图兜底。
+            var blankRetries = 0
+            while (result?.blankCritical == true && blankRetries < SCREENSHOT_BLANK_RETRIES) {
+                blankRetries++
+                logger.warn(
+                    "Agent device action=capture_screenshot outcome=blank_retry " +
+                        "attempt=$blankRetries source=accessibility"
+                )
+                result.bitmap?.recycle()
+                sleepForBlankRetry()
+                result = runCatching {
+                    service.captureScreenshotExcludingOverlays(excludedPackages)
+                }.getOrNull()
+            }
+            if (result?.blankCritical == true && canFallbackToRoot(excludedPackages)) {
+                logger.warn(
+                    "Agent device action=capture_screenshot outcome=blank_after_retries " +
+                        "fallback=root source=accessibility"
+                )
+                result.bitmap?.recycle()
+                result = null
+            }
+            val capture = result
+            val bitmap = capture?.bitmap
+            if (capture != null && bitmap != null) {
                 val capturedAt = SystemClock.elapsedRealtime()
                 val image = try {
                     runCatching {
@@ -744,43 +789,38 @@ internal class RootShellDeviceController(
                     return ScreenCapture(
                         image = image,
                         source = "accessibility",
-                        complete = result.complete,
-                        partial = result.partial,
-                        expectedWindows = result.expectedWindows,
-                        capturedWindows = result.capturedWindows,
-                        missingWindowIds = result.missingWindowIds,
-                        failureCodes = result.failureCodes,
-                        timedOut = result.timedOut,
-                        criticalWindowMissing = result.criticalWindowMissing,
+                        complete = capture.complete,
+                        partial = capture.partial,
+                        expectedWindows = capture.expectedWindows,
+                        capturedWindows = capture.capturedWindows,
+                        missingWindowIds = capture.missingWindowIds,
+                        failureCodes = capture.failureCodes,
+                        timedOut = capture.timedOut,
+                        criticalWindowMissing = capture.criticalWindowMissing,
+                        blank = capture.blankCritical,
                     )
                 }
             }
-            if (result?.criticalWindowMissing == true) {
+            if (capture?.criticalWindowMissing == true) {
                 logger.warn(
                     "Agent device action=capture_screenshot outcome=failed " +
-                        "reason=critical_window_missing failures=${result.failureCodes.size}"
+                        "reason=critical_window_missing failures=${capture.failureCodes.size}"
                 )
                 return ScreenCapture(
                     image = null,
                     source = "accessibility",
                     complete = false,
                     partial = false,
-                    expectedWindows = result.expectedWindows,
-                    capturedWindows = result.capturedWindows,
-                    missingWindowIds = result.missingWindowIds,
-                    failureCodes = result.failureCodes,
-                    timedOut = result.timedOut,
+                    expectedWindows = capture.expectedWindows,
+                    capturedWindows = capture.capturedWindows,
+                    missingWindowIds = capture.missingWindowIds,
+                    failureCodes = capture.failureCodes,
+                    timedOut = capture.timedOut,
                     criticalWindowMissing = true,
                 )
             }
         }
-        if (
-            !rootAvailable() ||
-            !ScreenshotOutcomePolicy.mayFallbackToRoot(
-                excludedPackagesPresent = excludedPackages.isNotEmpty(),
-                criticalWindowMissing = false,
-            )
-        ) {
+        if (!canFallbackToRoot(excludedPackages)) {
             logger.warn(
                 "Agent device action=capture_screenshot outcome=failed " +
                     "reason=package_exclusion_unavailable excludedPackages=${excludedPackages.size}"
@@ -824,7 +864,7 @@ internal class RootShellDeviceController(
         )
     }
 
-    /** OCR 截图结果：位图 + 采集完整性，供调用方诊断「偶发大段漏识别」。 */
+    /** OCR 截图结果：位图 + 采集完整性/黑帧诊断，供调用方判断「偶发大段漏识别」。 */
     data class OcrCapture(
         val bitmap: Bitmap,
         val source: String,
@@ -832,39 +872,81 @@ internal class RootShellDeviceController(
         val expectedWindows: Int,
         val capturedWindows: Int,
         val timedOut: Boolean,
+        /** 关键窗口抓到黑帧（重试后仍黑时为 true）。 */
+        val blank: Boolean = false,
+        /** 黑帧/部分截取触发过的重截次数。 */
+        val blankRetries: Int = 0,
     )
 
     /**
      * OCR 专用：截取原始位图（优先无障碍、其次 root），调用方负责回收。
+     * 部分截取（个别窗口失败/超时）或黑帧（关键窗口抓到但没画面）都会让识别大段缺失；
+     * 这里延时重截，仍黑且允许 root 时改用整屏截图兜底。
      */
     fun captureBitmapForOcr(): OcrCapture? {
         val excludedPackages = screenshotExcludedPackages()
         val service = AgentAccessibilityService.current()
         if (service != null) {
-            val capture = runCatching {
+            var capture = runCatching {
                 service.captureScreenshotExcludingOverlays(excludedPackages)
             }.getOrNull()
-            val bitmap = capture?.bitmap
-            if (capture != null && bitmap != null) {
+            var retries = 0
+            while (retries < OCR_CAPTURE_RETRIES) {
+                val current = capture ?: break
+                if (current.bitmap == null) break
+                if (current.complete && !current.blankCritical) break
+                retries++
+                logger.warn(
+                    "Agent ocr capture retry: attempt=$retries blank=${current.blankCritical} " +
+                        "complete=${current.complete} windows=${current.capturedWindows}/${current.expectedWindows}"
+                )
+                sleepForBlankRetry()
+                val next = runCatching {
+                    service.captureScreenshotExcludingOverlays(excludedPackages)
+                }.getOrNull()
+                if (next?.bitmap == null) break
+                current.bitmap.recycle()
+                capture = next
+            }
+            val finalCapture = capture
+            val bitmap = finalCapture?.bitmap
+            if (finalCapture != null && bitmap != null) {
+                if (!finalCapture.blankCritical || !canFallbackToRoot(excludedPackages)) {
+                    return OcrCapture(
+                        bitmap = bitmap,
+                        source = "accessibility",
+                        complete = finalCapture.complete,
+                        expectedWindows = finalCapture.expectedWindows,
+                        capturedWindows = finalCapture.capturedWindows,
+                        timedOut = finalCapture.timedOut,
+                        blank = finalCapture.blankCritical,
+                        blankRetries = retries,
+                    )
+                }
+                logger.warn("Agent ocr capture blank after retries; fallback to root screencap")
+                val rootCapture = captureRootOcr()
+                if (rootCapture != null) {
+                    bitmap.recycle()
+                    return rootCapture.copy(blankRetries = retries)
+                }
                 return OcrCapture(
                     bitmap = bitmap,
                     source = "accessibility",
-                    complete = capture.complete,
-                    expectedWindows = capture.expectedWindows,
-                    capturedWindows = capture.capturedWindows,
-                    timedOut = capture.timedOut,
+                    complete = finalCapture.complete,
+                    expectedWindows = finalCapture.expectedWindows,
+                    capturedWindows = finalCapture.capturedWindows,
+                    timedOut = finalCapture.timedOut,
+                    blank = true,
+                    blankRetries = retries,
                 )
             }
         }
-        if (
-            !rootAvailable() ||
-            !ScreenshotOutcomePolicy.mayFallbackToRoot(
-                excludedPackagesPresent = excludedPackages.isNotEmpty(),
-                criticalWindowMissing = false,
-            )
-        ) {
-            return null
-        }
+        if (!canFallbackToRoot(excludedPackages)) return null
+        return captureRootOcr()
+    }
+
+    /** root 兜底：整屏 screencap（会把 Eta 自身浮层拍进去，仅排除项为空且 root 可用时允许）。 */
+    private fun captureRootOcr(): OcrCapture? {
         val result = runSuBytes("screencap -p", timeoutSeconds = 8)
         if (result.exitCode != 0 || result.output.isEmpty()) return null
         val bitmap = BitmapFactory.decodeByteArray(result.output, 0, result.output.size) ?: return null
@@ -1456,6 +1538,8 @@ internal class RootShellDeviceController(
         val timedOut: Boolean = false,
         val criticalWindowMissing: Boolean = false,
         val requested: Boolean = true,
+        /** 关键窗口为黑帧（重试与 root 兜底都没救回时为 true）。 */
+        val blank: Boolean = false,
     ) {
         fun toJson(): JSONObject {
             val failures = JSONArray()
@@ -1485,6 +1569,7 @@ internal class RootShellDeviceController(
                 .put("failures", failures)
                 .put("timed_out", timedOut)
                 .put("critical_window_missing", criticalWindowMissing)
+                .put("blank", blank)
         }
 
         companion object {
