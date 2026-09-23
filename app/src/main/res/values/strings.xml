@@ -1236,4 +1236,7 @@
   <string name="settings_tts_summary">Read finished replies aloud for voice sessions; off by default</string>
   <string name="schedule_try_run">Run this task once now</string>
   <string name="schedule_try_started">Test run started; result will arrive as a notification</string>
+  <string name="tool_ocr_screen">Recognize screen text</string>
+  <string name="tool_ui_ocr_screen">Screen text recognition</string>
+  <string name="tool_ui_ocr_screen_summary">Offline OCR of the current screen with tap-ready coordinates</string>
 </resources>

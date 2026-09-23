@@ -120,6 +120,7 @@ internal fun toolDisplayNameResource(name: String): Int? = when (name) {
     "set_alarm" -> R.string.tool_set_alarm
     "set_timer" -> R.string.tool_set_timer
     "create_calendar_event" -> R.string.tool_create_calendar_event
+    "ocr_screen" -> R.string.tool_ocr_screen
     "device_status" -> R.string.tool_device_status
     "network_info" -> R.string.tool_network_info
     "media_control" -> R.string.tool_media_control

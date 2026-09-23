@@ -70,6 +70,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 
 internal fun iconForTool(toolId: String): ImageVector = when (toolId) {
     "observe", "observe_screen" -> Icons.Rounded.DocumentScanner
+    "ocr_screen", "识别屏幕文字" -> Icons.Rounded.FindReplace
     "click", "tap", "tap_element" -> Icons.Rounded.AdsClick
     "tap_text" -> Icons.Rounded.TextFields
     "tap_area" -> Icons.Rounded.MyLocation

@@ -147,6 +147,7 @@ dependencies {
 
     // Porcupine：轻量语音唤醒词检测（EtaHotwordService）
     implementation("ai.picovoice:porcupine-android:4.0.2")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.30.0")
 
     testImplementation(libs.junit)
     testImplementation(libs.json)

@@ -28,6 +28,10 @@
     public <init>();
 }
 
+# ONNX Runtime：JNI 通过类名/方法签名回调 Java 层，保持类与成员不被裁剪或混淆。
+-keep class ai.onnxruntime.** { *; }
+-dontwarn ai.onnxruntime.**
+
 # R8 默认规则已覆盖 Compose 运行时；Miuix 图标是普通 Kotlin 代码，允许 R8 裁掉未使用图标。
 # -dontwarn 仅抑制 KMP 依赖在 Android 侧可能出现的可选平台 warning，不阻止裁剪。
 -dontwarn top.yukonga.miuix.**

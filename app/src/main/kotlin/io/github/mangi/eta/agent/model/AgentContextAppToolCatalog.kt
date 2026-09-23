@@ -125,5 +125,14 @@ internal object AgentContextAppToolCatalog {
                         )
                 )
             )
+            .put(
+                AgentToolSchema.function(
+                    name = "ocr_screen",
+                    description = "对当前屏幕做本地离线文字识别（不消耗模型视觉额度），返回文本行与屏幕坐标；UI 节点缺失、界面以图片/Canvas 绘制或需要读图内文字时使用。返回坐标可直接用于 tap（coordinate_space=screen）。",
+                    parameters = JSONObject()
+                        .put("type", "object")
+                        .put("properties", JSONObject())
+                )
+            )
     }
 }

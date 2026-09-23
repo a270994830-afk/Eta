@@ -8,6 +8,8 @@ import io.github.mangi.eta.core.AgentLogger
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.os.SystemClock
 import java.io.IOException
@@ -820,6 +822,32 @@ internal class RootShellDeviceController(
             expectedWindows = 1,
             capturedWindows = 1,
         )
+    }
+
+    /**
+     * OCR 专用：截取原始位图（优先无障碍、其次 root），调用方负责回收。
+     */
+    fun captureBitmapForOcr(): Bitmap? {
+        val excludedPackages = screenshotExcludedPackages()
+        val service = AgentAccessibilityService.current()
+        if (service != null) {
+            val bitmap = runCatching {
+                service.captureScreenshotExcludingOverlays(excludedPackages).bitmap
+            }.getOrNull()
+            if (bitmap != null) return bitmap
+        }
+        if (
+            !rootAvailable() ||
+            !ScreenshotOutcomePolicy.mayFallbackToRoot(
+                excludedPackagesPresent = excludedPackages.isNotEmpty(),
+                criticalWindowMissing = false,
+            )
+        ) {
+            return null
+        }
+        val result = runSuBytes("screencap -p", timeoutSeconds = 8)
+        if (result.exitCode != 0 || result.output.isEmpty()) return null
+        return BitmapFactory.decodeByteArray(result.output, 0, result.output.size)
     }
 
     private fun dumpUiNodes(maxNodes: Int): List<UiNode> {

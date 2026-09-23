@@ -1219,4 +1219,7 @@
   <string name="settings_tts_summary">语音入口的任务完成后朗读回复内容；默认关闭</string>
   <string name="schedule_try_run">立即试跑一次</string>
   <string name="schedule_try_started">试跑已开始，结果会以通知汇报</string>
+  <string name="tool_ocr_screen">识别屏幕文字</string>
+  <string name="tool_ui_ocr_screen">屏幕文字识别</string>
+  <string name="tool_ui_ocr_screen_summary">离线识别当前屏幕文字并给出可点击坐标</string>
 </resources>

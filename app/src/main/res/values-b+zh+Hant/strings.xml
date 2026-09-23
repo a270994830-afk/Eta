@@ -1205,4 +1205,7 @@
   <string name="settings_tts_summary">語音入口的任務完成後朗讀回覆內容；預設關閉</string>
   <string name="schedule_try_run">立即試跑一次</string>
   <string name="schedule_try_started">試跑已開始，結果會以通知匯報</string>
+  <string name="tool_ocr_screen">辨識螢幕文字</string>
+  <string name="tool_ui_ocr_screen">螢幕文字辨識</string>
+  <string name="tool_ui_ocr_screen_summary">離線辨識目前螢幕文字並提供可點擊座標</string>
 </resources>

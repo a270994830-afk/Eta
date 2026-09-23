@@ -14,6 +14,7 @@ import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.model.AgentScreenObservationContract
 import io.github.mangi.eta.agent.model.AgentSensitiveToolPolicy
+import io.github.mangi.eta.agent.ocr.OnnxOcrEngine
 import io.github.mangi.eta.agent.overlay.AgentHapticFeedback
 import io.github.mangi.eta.agent.overlay.GestureIndicator
 import io.github.mangi.eta.agent.runtime.AgentAppContext
@@ -205,6 +206,7 @@ internal class AgentLocalTools(
                 in DEVICE_TOOL_NAMES ->
                     structuredDeviceTools.execute(toolCall.name, args)
                         ?: textResult(errorResult("UNKNOWN_TOOL", "未知设备工具"))
+                "ocr_screen" -> textResult(ocrScreen())
                 "read_image" -> fileVisionTool { imageTools.readImage(args) }
                 "terminal" -> textResult(terminalTool { terminal(args) })
                 "run_command" -> textResult(terminalTool { runCommand(args) })
@@ -264,6 +266,49 @@ internal class AgentLocalTools(
             sensitive = toolName in DEVICE_SENSITIVE_READ_TOOL_NAMES ||
                 toolName in DEVICE_SENSITIVE_ACTION_TOOL_NAMES,
         )
+    }
+
+    private fun ocrScreen(): String {
+        val bitmap = deviceController.captureBitmapForOcr()
+            ?: return errorResult("SCREENSHOT_UNAVAILABLE", "无法获取屏幕截图；请确认无障碍服务已开启")
+        return try {
+            val startedAt = SystemClock.elapsedRealtime()
+            val lines = OnnxOcrEngine.recognize(context, bitmap)
+            val (screenWidth, screenHeight) = deviceController.screenDimensions()
+            val space = RootShellDeviceController.CoordinateSpace(
+                screenWidth = screenWidth,
+                screenHeight = screenHeight,
+                screenshotWidth = bitmap.width,
+                screenshotHeight = bitmap.height,
+            )
+            val items = JSONArray()
+            lines.forEach { line ->
+                val point = space.fromScreenshot(
+                    line.centerX.coerceIn(0, bitmap.width - 1),
+                    line.centerY.coerceIn(0, bitmap.height - 1),
+                )
+                items.put(
+                    JSONObject()
+                        .put("text", line.text)
+                        .put("score", line.score.toDouble())
+                        .put("x", point.x)
+                        .put("y", point.y),
+                )
+            }
+            JSONObject()
+                .put("ok", true)
+                .put("tool", "ocr_screen")
+                .put("count", lines.size)
+                .put("lines", items)
+                .put("elapsed_ms", SystemClock.elapsedRealtime() - startedAt)
+                .put("note", "坐标为屏幕像素；点击请用 tap 并设置 coordinate_space=screen")
+                .toString()
+        } catch (failure: Throwable) {
+            logger.warn("Agent ocr_screen failed: type=${failure.javaClass.simpleName}")
+            errorResult("OCR_FAILED", failure.message ?: "屏幕文字识别失败")
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     private fun terminalTool(block: () -> String): String {
