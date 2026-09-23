@@ -13,6 +13,7 @@ import android.app.role.RoleManager
 import android.content.ComponentName
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.os.Build
@@ -36,6 +37,10 @@ internal object AssistantManager {
     // Android 37 RoleControllerManager 自身超时为 15 秒；本地 watchdog 只能晚于它做最终状态核验。
     private const val ROLE_OPERATION_WATCHDOG_MS = 17_000L
     private const val REFRESH_COOLDOWN_MS = 5_000L
+    /** 电源键兜底广播：不依赖数字助理身份，直接请 Eta 自己的进程拉起语音浮窗。 */
+    private const val ETA_PACKAGE = "io.github.mangi.eta"
+    private const val ETA_SPOKEN_QUERY_ACTION =
+        "io.github.mangi.eta.agent.voice.action.SPOKEN_QUERY"
 
     private val systemHandler by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         Handler(Looper.getMainLooper())
@@ -259,6 +264,28 @@ internal object AssistantManager {
                 ) { "$source: showSessionForActiveService 返回 false" }
             }
         }
+    }
+
+    /**
+     * 电源键兜底：当前用户没有把 Eta 设为默认助理（或系统拒绝会话）时，
+     * 广播请 Eta 自己的进程拉起语音浮窗（[EtaSpokenQueryReceiver] 收到空文本 = 直接开始聆听）。
+     * 广播是无反馈通道：发送成功即视为已消费按键；异常返回 false 让调用方放行原生助手。
+     */
+    fun showEtaOverlayFallback(
+        context: Context,
+        logger: ModuleLogger,
+        source: String,
+    ): Boolean = runCatching {
+        context.sendBroadcast(
+            Intent(ETA_SPOKEN_QUERY_ACTION).setPackage(ETA_PACKAGE)
+        )
+        logger.info("$source: 默认助理不可用，回退广播直接拉起 Eta 浮窗")
+        true
+    }.getOrElse { throwable ->
+        logger.warnThrottled("${source}_eta_overlay_fallback_failed") {
+            "$source: Eta 浮窗兜底广播失败，type=${throwable.safeLogType()}"
+        }
+        false
     }
 
     fun isAssistantConfigured(context: Context, target: PowerAssistantTarget): Boolean {

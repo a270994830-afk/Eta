@@ -9,12 +9,13 @@ import android.content.Intent
  *
  * 钩子运行在厂商助手进程内，直接启动 Eta 界面会被 Android 的后台启动限制拦截，
  * 因此改为发送广播：由 Eta 自己的进程收到后再启动浮层，符合系统限制。
+ * 文本可选：不带文本的广播（如电源键兜底入口）等效于直接打开语音面板开始聆听。
  */
 class EtaSpokenQueryReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_SPOKEN_QUERY) return
-        val query = intent.getStringExtra(EXTRA_QUERY)?.takeIf { it.isNotBlank() } ?: return
+        val query = intent.getStringExtra(EXTRA_QUERY)?.takeIf { it.isNotBlank() }
         EtaAssistantOverlayService.show(
             context = context.applicationContext,
             voiceMode = true,

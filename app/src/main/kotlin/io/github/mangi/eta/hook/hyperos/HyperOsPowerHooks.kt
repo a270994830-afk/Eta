@@ -43,6 +43,12 @@ internal object HyperOsPowerHooks {
                     if (target == PowerAssistantTarget.OEM || context == null) return@intercept chain.proceed()
                     if (AssistantManager.showAssistantSession(context, target, hooks.logger, "HyperOsPower", logFailures = true)) {
                         true
+                    } else if (
+                        target == PowerAssistantTarget.ETA &&
+                        AssistantManager.showEtaOverlayFallback(context, hooks.logger, "HyperOsPower")
+                    ) {
+                        // 助理会话不可用（如 Eta 未成为默认助理）：兜底由 Eta 自己拉起浮窗，仍消费按键。
+                        true
                     } else chain.proceed()
                 }
             }
