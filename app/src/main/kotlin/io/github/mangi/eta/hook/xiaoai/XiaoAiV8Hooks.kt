@@ -85,6 +85,12 @@ internal object XiaoAiV8Hooks {
             val query = chain.args.getOrNull(0)?.let { invokeString(it, "getQuery") }.orEmpty()
             val decision = if (query.isBlank()) {
                 null
+            } else if (XiaoAiTakeoverPolicy.isWakeWordPrefixed(query)) {
+                // 唤醒词开头：保持小爱原生处理，不认领给自定义模型。
+                logger.warnThrottled("xiaoai_v8_wake_word_passthrough") {
+                    "唤醒词开头，保持超级小爱原生处理"
+                }
+                null
             } else {
                 XiaoAiTakeoverPolicy.decide(
                     query = query,

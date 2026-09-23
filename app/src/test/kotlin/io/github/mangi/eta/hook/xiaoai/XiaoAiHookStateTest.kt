@@ -60,6 +60,61 @@ class XiaoAiHookStateTest {
     }
 
     @Test
+    fun wakeWordPrefixedQueriesStayNativeInsteadOfUsingTheCustomModel() {
+        assertNull(
+            XiaoAiTakeoverPolicy.decide(
+                query = "小爱同学，帮我查天气",
+                hasImage = false,
+                customModelEnabled = true,
+                requirePrefix = false,
+            )
+        )
+        assertNull(
+            XiaoAiTakeoverPolicy.decide(
+                query = "小爱，打开客厅灯",
+                hasImage = false,
+                customModelEnabled = true,
+                requirePrefix = false,
+            )
+        )
+        assertNull(
+            XiaoAiTakeoverPolicy.decide(
+                query = "小爱小爱 放首歌",
+                hasImage = false,
+                customModelEnabled = true,
+                requirePrefix = false,
+            )
+        )
+        assertEquals(
+            "帮我查天气",
+            XiaoAiTakeoverPolicy.decide(
+                query = "帮我查天气",
+                hasImage = false,
+                customModelEnabled = true,
+                requirePrefix = false,
+            )?.prompt,
+        )
+        assertEquals(
+            "小爱音箱怎么用",
+            XiaoAiTakeoverPolicy.decide(
+                query = "小爱音箱怎么用",
+                hasImage = false,
+                customModelEnabled = true,
+                requirePrefix = false,
+            )?.prompt,
+        )
+        assertEquals(
+            "小爱同学，帮我查天气",
+            XiaoAiTakeoverPolicy.decide(
+                query = "/agent 小爱同学，帮我查天气",
+                hasImage = false,
+                customModelEnabled = true,
+                requirePrefix = true,
+            )?.prompt,
+        )
+    }
+
+    @Test
     fun imageOnlyRequestGetsDefaultPromptWhenPrefixIsNotRequired() {
         assertEquals(
             "请分析这张图片",

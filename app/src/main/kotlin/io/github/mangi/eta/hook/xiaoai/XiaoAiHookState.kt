@@ -9,6 +9,11 @@ internal object XiaoAiTakeoverPolicy {
     private const val IMAGE_ONLY_PLACEHOLDER = "blank"
     private const val IMAGE_ONLY_PROMPT = "请分析这张图片"
 
+    /** 小爱唤醒词：以唤醒词开头的话语保持厂商原生处理（不使用自定义模型），直接是唤醒词本身也算。 */
+    private val WAKE_WORD_PREFIXES = listOf("小爱同学", "小爱小爱")
+    /** 唤醒词后紧跟这些字符才算命中，避免「小爱音箱怎么用」这类正常提问被误判。 */
+    private const val WAKE_WORD_SEPARATORS = "，,、。.！!？?：:；;～~ "
+
     data class Decision(
         val prompt: String,
     )
@@ -28,6 +33,7 @@ internal object XiaoAiTakeoverPolicy {
     ): Decision? {
         if (!customModelEnabled) return null
         val trimmed = query.trim()
+        if (isWakeWordPrefixed(trimmed)) return null
         val prefixed = when {
             trimmed.startsWith(AGENT_PREFIX) ->
                 trimmed.removePrefix(AGENT_PREFIX).trim()
@@ -50,6 +56,15 @@ internal object XiaoAiTakeoverPolicy {
             }
         }
         return prompt.takeIf(String::isNotBlank)?.let(::Decision)
+    }
+
+    /** 以唤醒词开头（唤醒词后跟标点/空白，或直接就是唤醒词本身）时返回 true。 */
+    fun isWakeWordPrefixed(query: String): Boolean {
+        val normalized = query.trimStart()
+        if (normalized.isEmpty()) return false
+        if (WAKE_WORD_PREFIXES.any(normalized::startsWith)) return true
+        val followed = normalized.removePrefix("小爱")
+        return followed !== normalized && followed.isNotEmpty() && followed[0] in WAKE_WORD_SEPARATORS
     }
 }
 
