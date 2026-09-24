@@ -115,6 +115,20 @@ class XiaoAiHookStateTest {
     }
 
     @Test
+    fun powerKeySessionGateOnlyAcceptsPowerKeySourcesAndFreshMarks() {
+        assertTrue(XiaoAiTakeoverPolicy.isPowerKeySource("long_press_power_key"))
+        assertTrue(XiaoAiTakeoverPolicy.isPowerKeySource("LONG_PRESS_POWER_KEY"))
+        assertFalse(XiaoAiTakeoverPolicy.isPowerKeySource("long_press_home_key"))
+        assertFalse(XiaoAiTakeoverPolicy.isPowerKeySource(null))
+
+        val now = 1_000_000L
+        assertTrue(XiaoAiTakeoverPolicy.isFreshPowerKeySession(now - 5_000L, now))
+        assertFalse(XiaoAiTakeoverPolicy.isFreshPowerKeySession(now - 31_000L, now))
+        assertFalse(XiaoAiTakeoverPolicy.isFreshPowerKeySession(0L, now))
+        assertFalse(XiaoAiTakeoverPolicy.isFreshPowerKeySession(now + 1L, now))
+    }
+
+    @Test
     fun imageOnlyRequestGetsDefaultPromptWhenPrefixIsNotRequired() {
         assertEquals(
             "请分析这张图片",

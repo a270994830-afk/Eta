@@ -66,6 +66,18 @@ internal object XiaoAiTakeoverPolicy {
         val followed = normalized.removePrefix("小爱")
         return followed !== normalized && followed.isNotEmpty() && followed[0] in WAKE_WORD_SEPARATORS
     }
+
+    /** 电源键入口来源匹配：不同 ROM 取值可能带前后缀，用包含匹配。 */
+    fun isPowerKeySource(source: String?): Boolean =
+        source?.contains("power_key", ignoreCase = true) == true
+
+    /** 按键会话有效窗口（毫秒）：入口标记后这段时间内的语音识别算「按键会话」。 */
+    fun isFreshPowerKeySession(entryAtMillis: Long, nowMillis: Long): Boolean =
+        entryAtMillis in 1..nowMillis &&
+            nowMillis - entryAtMillis <= POWER_KEY_SESSION_WINDOW_MS
+
+    /** 认领判定窗口：电源键入口到用户说话的间隔远小于此值。 */
+    const val POWER_KEY_SESSION_WINDOW_MS = 30_000L
 }
 
 internal class XiaoAiRunSlot<T : Any> {

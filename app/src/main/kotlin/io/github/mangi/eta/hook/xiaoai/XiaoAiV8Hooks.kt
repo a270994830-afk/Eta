@@ -3,6 +3,7 @@ package io.github.mangi.eta.hook.xiaoai
 import android.content.Context
 import android.content.Intent
 import io.github.mangi.eta.agent.runtime.AgentAppContext
+import io.github.mangi.eta.config.PowerAssistantTarget
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.core.HookInstallation
 import io.github.mangi.eta.core.HookRegistrar
@@ -34,9 +35,16 @@ internal object XiaoAiV8Hooks {
         "io.github.mangi.eta.agent.voice.action.SPOKEN_QUERY"
     private const val EXTRA_SPOKEN_QUERY = "io.github.mangi.eta.agent.voice.extra.SPOKEN_QUERY"
 
+    private const val VOICE_SERVICE_CLASS = "com.xiaomi.voiceassistant.VoiceService"
+    private const val EXTRA_START_FROM_KEY = "voice_assist_start_from_key"
+    private const val EXTRA_FUNCTION_KEY = "voice_assist_function_key"
+
     /** 认领生效窗口：期间丢弃小爱原生下发的指令。 */
     private const val CLAIM_WINDOW_MS = 20_000L
     private val claimUntil = AtomicLong(0L)
+
+    /** 最近一次「电源键入口」时间戳：只有按键会话的语音交给 Eta，语音唤醒全部归小爱。 */
+    private val powerKeyEntryAt = AtomicLong(0L)
 
     fun isSupportedVersion(versionCode: Long): Boolean = versionCode == SUPPORTED_VERSION_CODE
 
@@ -47,8 +55,55 @@ internal object XiaoAiV8Hooks {
     ): HookInstallation {
         val hooks = HookRegistrar(module, rootLogger, "XiaoAiV8")
         return hooks.install {
+            hookVoiceEntry(this, rootLogger, classLoader)
             hookAsrClaim(this, rootLogger, classLoader)
             hookInstructionDrop(this, rootLogger, classLoader)
+        }
+    }
+
+    /**
+     * 电源键入口识别：小爱启动语音会话时 Intent 里带来源字段（voice_assist_start_from_key）。
+     * 命中电源键来源就记一个时间戳，供 ASR 认领分流——按键会话给 Eta，语音唤醒全部归小爱。
+     */
+    private fun hookVoiceEntry(
+        hooks: HookRegistrar,
+        logger: ModuleLogger,
+        classLoader: ClassLoader,
+    ) {
+        val serviceClass = HookSupport.findClassOrNull(classLoader, VOICE_SERVICE_CLASS)
+        val method = serviceClass?.let {
+            HookSupport.findMethod(
+                it,
+                "onStartCommand",
+                Intent::class.java,
+                Int::class.javaPrimitiveType!!,
+                Int::class.javaPrimitiveType!!,
+            )
+        }
+        if (method == null) {
+            hooks.missing(
+                id = "xiaoai.v8.power-entry",
+                description = "VoiceService.onStartCommand",
+                detail = "未找到 $VOICE_SERVICE_CLASS.onStartCommand(Intent, int, int)",
+            )
+            return
+        }
+        hooks.intercept(
+            id = "xiaoai.v8.power-entry",
+            executable = method,
+            description = "XiaoAi 8.x VoiceService.onStartCommand",
+        ) { chain ->
+            val intent = chain.args.getOrNull(0) as? Intent
+            val source = intent?.getStringExtra(EXTRA_START_FROM_KEY)
+            val function = intent?.getStringExtra(EXTRA_FUNCTION_KEY)
+            if (source != null || function != null) {
+                logger.info("小爱入口：start_from_key=$source function_key=$function")
+            }
+            if (XiaoAiTakeoverPolicy.isPowerKeySource(source)) {
+                powerKeyEntryAt.set(System.currentTimeMillis())
+                logger.info("电源键入口：已标记按键会话（本次语音按 Eta 接管处理）")
+            }
+            chain.proceed()
         }
     }
 
@@ -83,7 +138,18 @@ internal object XiaoAiV8Hooks {
             description = "XiaoAi 8.x OperationManager.onAsrResult",
         ) { chain ->
             val query = chain.args.getOrNull(0)?.let { invokeString(it, "getQuery") }.orEmpty()
+            val powerKeySession = Prefs.powerAssistantTarget() == PowerAssistantTarget.ETA &&
+                XiaoAiTakeoverPolicy.isFreshPowerKeySession(
+                    entryAtMillis = powerKeyEntryAt.get(),
+                    nowMillis = System.currentTimeMillis(),
+                )
             val decision = if (query.isBlank()) {
+                null
+            } else if (!powerKeySession) {
+                // 语音唤醒等非按键入口：全部保持超级小爱原生，不认领。
+                logger.warnThrottled("xiaoai_v8_session_native") {
+                    "非按键会话，保持超级小爱原生处理（语音唤醒归小爱）"
+                }
                 null
             } else if (XiaoAiTakeoverPolicy.isWakeWordPrefixed(query)) {
                 // 唤醒词开头：保持小爱原生处理，不认领给自定义模型。
@@ -103,7 +169,7 @@ internal object XiaoAiV8Hooks {
                 val context = AgentAppContext.resolve()
                 if (context != null && launchEtaAssist(logger, context, decision.prompt)) {
                     claimUntil.set(android.os.SystemClock.uptimeMillis() + CLAIM_WINDOW_MS)
-                    logger.info("已接管超级小爱 8.x 请求")
+                    logger.info("已接管超级小爱按键会话请求（电源键 → Eta）")
                     // 不调用 chain.proceed()：跳过小爱原生处理。
                     return@intercept null
                 }

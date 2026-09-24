@@ -40,14 +40,10 @@ internal object HyperOsPowerHooks {
                     }
                     val target = Prefs.powerAssistantTarget()
                     val context = contextField.get(chain.getThisObject()) as? Context
-                    if (target == PowerAssistantTarget.OEM || context == null) return@intercept chain.proceed()
+                    // 按键会话保持小爱界面与识别：由小爱进程内的接管钩子按「按键会话」标记交给 Eta 回答，
+                    // 这里只放行、不消费快捷键。Gemini 目标仍走数字助理会话。
+                    if (target != PowerAssistantTarget.GEMINI || context == null) return@intercept chain.proceed()
                     if (AssistantManager.showAssistantSession(context, target, hooks.logger, "HyperOsPower", logFailures = true)) {
-                        true
-                    } else if (
-                        target == PowerAssistantTarget.ETA &&
-                        AssistantManager.showEtaOverlayFallback(context, hooks.logger, "HyperOsPower")
-                    ) {
-                        // 助理会话不可用（如 Eta 未成为默认助理）：兜底由 Eta 自己拉起浮窗，仍消费按键。
                         true
                     } else chain.proceed()
                 }
