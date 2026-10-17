@@ -48,6 +48,37 @@ internal object AgentModelClient {
                         Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_READ_TOOLS),
                     deviceSensitiveActionTools =
                         Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
+                    shadowTools = Prefs.isEnabled(Prefs.Keys.AGENT_SHADOW_TOOLS),
+                    thinkingEnabled = effort.enablesReasoning,
+                    reasoningEffort = effort,
+                )
+            }
+        }
+        // 无头路径（外部聊天通道 / MCP / 定时任务 / 快捷指令）：pref 缺失时按数据库里当前选中的 provider/model 重建配置
+        runCatching {
+            val resolved = kotlinx.coroutines.runBlocking {
+                val settings = io.github.mangi.eta.data.datastore.SettingsDataStore.settings()
+                val providerId = settings.selectedProviderId.orEmpty()
+                val modelId = settings.selectedModelId.orEmpty()
+                if (providerId.isBlank() || modelId.isBlank()) return@runBlocking null
+                val provider = io.github.mangi.eta.data.repository.ProviderRepository.providerById(providerId)
+                    ?: return@runBlocking null
+                val model = io.github.mangi.eta.data.repository.ModelRepository.modelsByProvider(providerId)
+                    .firstOrNull { it.id == modelId || it.modelId == modelId } ?: return@runBlocking null
+                io.github.mangi.eta.data.repository.RuntimeConfigRepository.buildRuntimeConfig(provider, model)
+            }
+            if (resolved != null && resolved.apiKey.isNotBlank() && resolved.baseUrl.isNotBlank()) {
+                val thinkingAllowed = Prefs.isEnabled(Prefs.Keys.AGENT_THINKING_ENABLED)
+                val effort = if (thinkingAllowed) resolved.effectiveReasoningEffort else ReasoningEffort.OFF
+                return resolved.copy(
+                    terminalTools = Prefs.isEnabled(Prefs.Keys.AGENT_TERMINAL_TOOLS),
+                    browserTools = Prefs.isEnabled(Prefs.Keys.AGENT_BROWSER_TOOLS),
+                    deviceDirectTools = Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_DIRECT_TOOLS),
+                    deviceSensitiveReadTools =
+                        Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_READ_TOOLS),
+                    deviceSensitiveActionTools =
+                        Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
+                    shadowTools = Prefs.isEnabled(Prefs.Keys.AGENT_SHADOW_TOOLS),
                     thinkingEnabled = effort.enablesReasoning,
                     reasoningEffort = effort,
                 )
@@ -74,6 +105,7 @@ internal object AgentModelClient {
                 Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_READ_TOOLS),
             deviceSensitiveActionTools =
                 Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
+            shadowTools = Prefs.isEnabled(Prefs.Keys.AGENT_SHADOW_TOOLS),
             thinkingEnabled = Prefs.isEnabled(Prefs.Keys.AGENT_THINKING_ENABLED),
             reasoningEffort = ReasoningEffort.fromLegacy(
                 Prefs.isEnabled(Prefs.Keys.AGENT_THINKING_ENABLED)
@@ -81,7 +113,7 @@ internal object AgentModelClient {
         )
     }
 
-    fun complete(
+    fun completeOnce(
         config: ModelConfig,
         prompt: String,
         toolExecutor: ToolExecutor,
@@ -135,6 +167,27 @@ internal object AgentModelClient {
         ).length()
         fun toolsFor(capabilities: AgentToolCapabilities): JSONArray {
             if (rewriteReply) return JSONArray()
+            // MCP 工具默认延迟加载（见 appendAdditionalTools）
+            val mcpToolsDeferred = !io.github.mangi.eta.config.Prefs.isEnabled(
+                io.github.mangi.eta.config.Prefs.Keys.AGENT_MCP_TOOLS_EAGER,
+            )
+            // 合并本轮附加工具（MCP / 会话历史 / 角色记忆）。MCP 工具默认延迟加载：
+            // 上百个 schema 全量注入会占几万 token、每轮多花几秒（实测 344 工具 / ~10 万 token / 每轮 4s）。
+            // 它们仍注册到 search_tools 的检索库，模型按需取 schema 再按名字调用。
+            fun appendAdditionalTools(target: JSONArray) {
+                for (index in 0 until additionalTools.length()) {
+                    val tool = additionalTools.optJSONObject(index) ?: continue
+                    val name = tool.optJSONObject("function")?.optString("name").orEmpty()
+                    if (mcpToolsDeferred && name.startsWith("mcp_")) continue
+                    target.put(tool)
+                }
+            }
+            // 工具精简（CLI）模式：只下发核心工具 + search_tools，其余按需检索。
+            if (io.github.mangi.eta.config.Prefs.isEnabled(io.github.mangi.eta.config.Prefs.Keys.AGENT_TOOL_CLI_MODE)) {
+                val core = io.github.mangi.eta.agent.tool.AgentToolSearch.cliTools(capabilities)
+                appendAdditionalTools(core)
+                return core
+            }
             val tools = AgentToolCatalog.build(
                 terminalTools = config.terminalTools,
                 browserTools = config.browserTools,
@@ -145,11 +198,10 @@ internal object AgentModelClient {
                 skillGitHubInstall = true,
                 memoryTools = memoryContext.enabled,
                 memoryWritable = roleplayContext == null,
+                shadowTools = config.shadowTools,
                 capabilities = capabilities,
             )
-            for (index in 0 until additionalTools.length()) {
-                tools.put(additionalTools.opt(index))
-            }
+            appendAdditionalTools(tools)
             return tools
         }
         val tools = toolsFor(initialCapabilities)
@@ -220,6 +272,74 @@ internal object AgentModelClient {
         )
     }
 
+    /**
+     * R3 主备切换：主源遇永久失败（配额/鉴权/模型不存在等）且配置了备用时，用备用配置重跑一次。
+     */
+    fun complete(
+        config: ModelConfig,
+        prompt: String,
+        toolExecutor: ToolExecutor,
+        images: List<ModelImage> = emptyList(),
+        history: List<ConversationMessage> = emptyList(),
+        provider: AgentProviderClient = ProviderClientFactory.getClient(config),
+        runController: AgentRunController = AgentRunController(),
+        skillContext: SkillContext = SkillContext.EMPTY,
+        memoryContext: AgentMemoryContext = AgentMemoryContext.DISABLED,
+        additionalTools: JSONArray = JSONArray(),
+        capabilitiesProvider: () -> AgentToolCapabilities = { AgentToolCapabilities(rootAvailable = false) },
+        sessionId: String = java.util.UUID.randomUUID().toString(),
+        compactOnly: Boolean = false,
+        operationId: String = sessionId,
+        initialUserMessageId: String = "user-$operationId",
+        initialSupplementIndex: Int = 0,
+        roleplayContext: RoleplayRunContext? = null,
+        rewriteReply: Boolean = false,
+        assistantScreenContext: String = "",
+        onContextSnapshot: (AgentContextSnapshot) -> Unit = {},
+        onTranscript: (List<ConversationMessage>) -> Unit = {},
+        onEvent: (AgentEvent) -> Unit = {}
+    ): ModelResponse.Text {
+        return try {
+            val purpose = when {
+                compactOnly -> AgentFunctionModelResolver.PURPOSE_COMPACTION
+                rewriteReply -> AgentFunctionModelResolver.PURPOSE_REPLY_REWRITE
+                else -> AgentFunctionModelResolver.PURPOSE_CHAT
+            }
+            val primaryConfig = AgentApiKeyPool.apply(AgentFunctionModelResolver.resolve(config, purpose))
+            completeOnce(
+                primaryConfig, prompt, toolExecutor, images, history,
+                ProviderClientFactory.getClient(primaryConfig), runController,
+                skillContext, memoryContext, additionalTools, capabilitiesProvider, sessionId,
+                compactOnly, operationId, initialUserMessageId, initialSupplementIndex,
+                roleplayContext, rewriteReply, assistantScreenContext, onContextSnapshot, onTranscript, onEvent,
+            )
+        } catch (throwable: Throwable) {
+            val permanent = ((throwable as? AgentModelExecutionException)?.cause as? AgentModelFailure)
+                ?: (throwable as? AgentModelFailure)
+            if (permanent == null || !AgentModelFallback.shouldSwitch(permanent)) throw throwable
+            val fallback = runCatching {
+                kotlinx.coroutines.runBlocking { AgentModelFallback.resolve(config.providerId) }
+            }.getOrNull() ?: throw throwable
+            onEvent(
+                AgentEvent.ModelRetryScheduled(
+                    round = 0,
+                    attempt = 0,
+                    maxAttempts = 0,
+                    delayMs = 0,
+                    reasonCode = "FALLBACK_TO:${fallback.providerName}/${fallback.modelDisplayName}",
+                )
+            )
+            val fallbackConfig = AgentApiKeyPool.apply(fallback)
+            completeOnce(
+                fallbackConfig, prompt, toolExecutor, images, history,
+                ProviderClientFactory.getClient(fallbackConfig), runController,
+                skillContext, memoryContext, additionalTools, capabilitiesProvider, sessionId,
+                compactOnly, operationId, initialUserMessageId, initialSupplementIndex,
+                roleplayContext, rewriteReply, assistantScreenContext, onContextSnapshot, onTranscript, onEvent,
+            )
+        }
+    }
+
     private fun ModelConfig.validate() {
         require(baseUrl.isNotBlank()) { "请先配置 API 地址" }
         require(apiKey.isNotBlank()) { "请先配置 API Key" }
@@ -271,6 +391,7 @@ internal object AgentModelClient {
         val deviceDirectTools: Boolean = true,
         val deviceSensitiveReadTools: Boolean = false,
         val deviceSensitiveActionTools: Boolean = false,
+        val shadowTools: Boolean = false,
         val thinkingEnabled: Boolean = false,
         val reasoningEffort: ReasoningEffort? = null,
         val reasoningCapabilities: ModelReasoningCapabilities? = null,

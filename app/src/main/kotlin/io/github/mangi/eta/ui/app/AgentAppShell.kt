@@ -349,7 +349,9 @@ private fun titleForRoute(route: AppRoute?): String = when (route) {
     is AppRoute.CharacterMemory -> "剧情记忆"
     is AppRoute.Permissions -> stringResource(R.string.route_permissions)
     is AppRoute.SystemEnhance -> stringResource(R.string.route_system_enhancements)
+    is AppRoute.DevTools -> "开发工具箱"
     is AppRoute.Settings -> stringResource(R.string.route_settings)
+    is AppRoute.AgentExtSettings -> "扩展设置"
     is AppRoute.SpeechSettings -> stringResource(R.string.speech_settings_title)
     is AppRoute.SpeechRecognition -> stringResource(R.string.speech_recognition_title)
     is AppRoute.SpeechSynthesis -> stringResource(R.string.speech_synthesis_title)

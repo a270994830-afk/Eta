@@ -13,6 +13,11 @@ internal object McpAuthorizationType {
     const val BEARER = "bearer"
 }
 
+internal object McpTransport {
+    /** stdio 传输前缀：url 形如 `stdio://<command>`，可选 `?cwd=<dir>` 指定工作目录。 */
+    const val STDIO_PREFIX = "stdio://"
+}
+
 @Serializable
 internal data class McpToolDefinition(
     val name: String,

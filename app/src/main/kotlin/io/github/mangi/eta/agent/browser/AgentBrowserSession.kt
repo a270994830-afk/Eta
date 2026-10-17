@@ -88,6 +88,10 @@ internal object AgentBrowserSession {
     private const val NAVIGATION_TIMEOUT_MS = 25_000L
     private const val JAVASCRIPT_TIMEOUT_MS = 8_000L
     private const val POST_ACTION_TIMEOUT_MS = 10_000L
+    private const val EVALUATE_TIMEOUT_MS = 10_000L
+    private const val EVALUATE_MAX_CHARS = 20_000
+    private const val DEFAULT_HTML_CHARS = 20_000
+    private const val MAX_HTML_CHARS = 100_000
     private const val OFFSCREEN_VIEWPORT_MAX_WIDTH = 1_280
     private const val OFFSCREEN_VIEWPORT_MAX_HEIGHT = 2_400
     private const val PREVIEW_MAX_WIDTH = 480
@@ -364,6 +368,8 @@ internal object AgentBrowserSession {
                         "go_forward" -> historyNavigation(action, backwards = false)
                         "reload" -> reload()
                         "wait_for_selector" -> waitForSelector(args)
+                        "evaluate" -> evaluate(args)
+                        "get_html" -> getHtml(args)
                         else -> throw BrowserFailure("INVALID_ACTION", "浏览器 action 无效")
                     }
                 }.getOrElse { throwable -> failureResult(action, throwable) }
@@ -588,6 +594,44 @@ internal object AgentBrowserSession {
         )
     }
 
+    private fun evaluate(args: JSONObject): BrowserToolResult {
+        if (!args.has("script") || args.isNull("script")) {
+            throw BrowserFailure("INVALID_ARGUMENT", "evaluate 缺少 script")
+        }
+        val script = args.optString("script")
+        if (script.isBlank()) {
+            throw BrowserFailure("INVALID_ARGUMENT", "evaluate 的 script 不能为空")
+        }
+        val view = requirePage()
+        val raw = runScriptOnMain(view, script)
+        val truncated = raw.length > EVALUATE_MAX_CHARS
+        return toolResult(
+            baseEnvelope("evaluate", true, "ok")
+                .put("text", if (truncated) raw.take(EVALUATE_MAX_CHARS) else raw)
+                .put("result_length", raw.length)
+                .put("returned_chars", minOf(raw.length, EVALUATE_MAX_CHARS))
+                .put("truncated", truncated)
+        )
+    }
+
+    private fun getHtml(args: JSONObject): BrowserToolResult {
+        val view = requirePage()
+        val maxChars = args.optInt("max_chars", DEFAULT_HTML_CHARS).coerceIn(256, MAX_HTML_CHARS)
+        val script = "(function(){var h=document.documentElement?document.documentElement.outerHTML:'';" +
+            "var max=$maxChars;return {html:h.length>max?h.slice(0,max):h,length:h.length};})()"
+        val raw = runScriptOnMain(view, script)
+        val payload = runCatching { JSONTokener(raw).nextValue() }.getOrNull() as? JSONObject
+        val html = payload?.optString("html").orEmpty()
+        val total = payload?.optInt("length", html.length) ?: html.length
+        return toolResult(
+            baseEnvelope("get_html", true, "ok")
+                .put("text", html)
+                .put("html_length", total)
+                .put("returned_chars", html.length)
+                .put("truncated", total > html.length)
+        )
+    }
+
     private fun targetFrom(args: JSONObject): BrowserTarget {
         val selector = validatedSelector(args, required = false)
         val hasX = args.has("coordinate_x") && !args.isNull("coordinate_x")
@@ -804,6 +848,44 @@ internal object AgentBrowserSession {
         if (value is JSONObject) return value
         if (value is JSONArray) return JSONObject().put("items", value)
         return JSONObject().put("value", value)
+    }
+
+    /** 直接执行脚本并取回原始返回值（JSON 字符串），不复用 DOM 结果包装。 */
+    private fun runScriptOnMain(view: WebView, script: String): String {
+        throwIfInterrupted()
+        val epoch = activeOperationEpoch
+        val latch = CountDownLatch(1)
+        var raw: String? = null
+        mainHandler.post {
+            if (webView !== view || interrupted.get() || activeOperationEpoch != epoch || epoch == 0L) {
+                latch.countDown()
+            } else {
+                runCatching {
+                    view.evaluateJavascript(script) { value ->
+                        raw = value
+                        latch.countDown()
+                    }
+                }.onFailure {
+                    if (activeOperationEpoch == epoch) {
+                        interrupted.set(true)
+                        operationEpoch.incrementAndGet()
+                        activeOperationEpoch = 0L
+                    }
+                    latch.countDown()
+                }
+            }
+        }
+        if (!latch.await(EVALUATE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            if (activeOperationEpoch == epoch) {
+                interrupted.set(true)
+                operationEpoch.incrementAndGet()
+                activeOperationEpoch = 0L
+            }
+            mainHandler.post { runCatching { view.stopLoading() } }
+            throw BrowserFailure("SCRIPT_TIMEOUT", "脚本执行超时", "timeout")
+        }
+        throwIfInterrupted()
+        return raw ?: "null"
     }
 
     private fun captureViewport(view: WebView, preview: Boolean = false): BrowserImage {
@@ -1118,6 +1200,8 @@ internal object AgentBrowserSession {
         "go_forward",
         "reload",
         "wait_for_selector",
+        "evaluate",
+        "get_html",
     )
 
 }

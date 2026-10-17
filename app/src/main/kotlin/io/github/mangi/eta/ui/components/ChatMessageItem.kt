@@ -958,7 +958,8 @@ private fun AgentMessageBlock(
                             )
                         }
                     }
-                    if (message.characterEditable && message.candidateCount > 1) {
+                    // candidateCount/selectedCandidate 由角色扮演的候选切换与普通对话的版本历史共同投影。
+                    if (message.candidateCount > 1) {
                         Spacer(Modifier.weight(1f))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

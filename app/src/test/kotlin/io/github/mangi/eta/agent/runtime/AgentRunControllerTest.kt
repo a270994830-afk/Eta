@@ -104,6 +104,32 @@ class AgentRunControllerTest {
     }
 
     @Test
+    fun abortInFlightRequestsCancelsResourcesWithoutCancellingRun() {
+        val controller = AgentRunController()
+        val cancellations = AtomicInteger(0)
+        controller.register { cancellations.incrementAndGet() }
+
+        controller.abortInFlightRequests()
+
+        assertEquals(1, cancellations.get())
+        assertFalse(controller.isCancelled)
+        assertNull(runCatching(controller::throwIfCancelled).exceptionOrNull())
+    }
+
+    @Test
+    fun abortInFlightRequestsDoesNotUnlockCancelledRun() {
+        val controller = AgentRunController()
+        val cancellations = AtomicInteger(0)
+        controller.register { cancellations.incrementAndGet() }
+
+        controller.abortInFlightRequests()
+        controller.cancel()
+
+        assertEquals(1, cancellations.get())
+        assertTrue(runCatching(controller::throwIfCancelled).exceptionOrNull() is AgentRunCancelledException)
+    }
+
+    @Test
     fun pauseBlocksUntilResume() {
         val controller = AgentRunController()
         val entered = CountDownLatch(1)

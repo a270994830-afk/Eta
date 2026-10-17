@@ -9,6 +9,7 @@ import io.github.mangi.eta.agent.reminder.EtaReminderScheduler
 import io.github.mangi.eta.agent.schedule.EtaScheduleScheduler
 import io.github.mangi.eta.agent.skill.SkillRuntime
 import io.github.mangi.eta.agent.device.RootAccess
+import io.github.mangi.eta.agent.mcp.EtaMcpServerService
 import io.github.mangi.eta.agent.terminal.TerminalRuntime
 import io.github.mangi.eta.agent.voice.EtaHotwordService
 import io.github.mangi.eta.agent.voice.EtaQuickActionShortcuts
@@ -21,6 +22,7 @@ import io.github.mangi.eta.data.repository.AppearanceSettingsRepository
 import io.github.mangi.eta.data.repository.McpServerRepository
 import io.github.mangi.eta.data.repository.LinuxEnvironmentSettingsRepository
 import io.github.mangi.eta.data.repository.ProviderRepository
+import io.github.mangi.eta.data.seed.EtaSeedInstaller
 import io.github.mangi.eta.ui.app.PredictiveBackController
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
@@ -43,12 +45,22 @@ class EtaApp : Application(), XposedServiceHelper.OnServiceListener {
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Shizuku 授权结果监听（必须在 App 层长期持有，否则会被回收）。 */
+    private val shizukuPermissionListener = rikka.shizuku.Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        AndroidAgentLogger.info(
+            "shizuku permission result code=$requestCode granted=${grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED}"
+        )
+    }
+
     interface ServiceStateListener {
         fun onServiceStateChanged(service: XposedService?)
     }
 
     override fun onCreate() {
         super.onCreate()
+        if (Application.getProcessName() == packageName) {
+            EtaSeedInstaller.applyIfNeeded(this)
+        }
         Prefs.initLocal(this)
         if (!AppProcessPolicy.shouldInitializeFullRuntime(Application.getProcessName(), packageName)) {
             return
@@ -63,10 +75,27 @@ class EtaApp : Application(), XposedServiceHelper.OnServiceListener {
         AgentMemoryRepository.init(this)
         ProviderRepository.init(this)
         McpServerRepository.init(this)
+        io.github.mangi.eta.agent.model.AgentUsageTracker.init(this)
+        io.github.mangi.eta.agent.model.AgentRateLimiter.init(this)
+        io.github.mangi.eta.agent.tool.AgentToolPermissionStore.init(this)
+        io.github.mangi.eta.data.repository.CharacterRepository.initialize(this)
+        runCatching { rikka.shizuku.Shizuku.addRequestPermissionResultListener(shizukuPermissionListener) }
         if (Prefs.isEnabled(Prefs.Keys.ETA_HOTWORD_ENABLED)) {
             runCatching { EtaHotwordService.start(this) }
         }
+        // 桌宠：开关是开的就随进程启动恢复（否则重启后要手动再开一次）
+        if (io.github.mangi.eta.agent.pet.AgentPet.isEnabled()) {
+            runCatching { io.github.mangi.eta.agent.pet.EtaPetService.show(this) }
+        }
         runCatching { EtaQuickActionShortcuts.publish(this) }
+        // 本地 MCP Server：把 Eta 工具集通过 MCP 对外开放（默认关闭，设置页开启后自启）
+        if (Prefs.isEnabled(Prefs.Keys.MCP_SERVER_ENABLED)) {
+            runCatching { EtaMcpServerService.start(this) }
+        }
+        // 外部聊天通道（HTTP + A2A，默认关闭，设置里开启后自启）
+        if (Prefs.isEnabled(Prefs.Keys.EXTERNAL_CHAT_ENABLED)) {
+            runCatching { io.github.mangi.eta.agent.external.EtaExternalChatService.start(this) }
+        }
         EtaReminderScheduler.sync(this)
         EtaScheduleScheduler.sync(this)
         XposedServiceHelper.registerListener(this)

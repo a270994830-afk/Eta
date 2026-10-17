@@ -94,6 +94,10 @@ internal object AgentPromptBuilder {
                     "任何工具返回 ACTION_OUTCOME_UNKNOWN 或 DIRECTION_MISMATCH 时，必须先重新观察，禁止直接重放动作；" +
                     "输入精确文本优先用 replace_text 或 paste_text，长文本/中文/特殊字符优先用 paste_text；" +
                     "用户明确要求发送消息时，直接使用通用 GUI 工具完成输入和点击发送，不让用户手动完成，也不追加二次确认；" +
+                    "用户要看某个应用的最新消息或未读消息（如微信、QQ）时，先调用 recent_notifications 并按包名过滤（微信 com.tencent.mm、QQ com.tencent.mobileqq）；" +
+                    "通知栏读不到时用 search_notification_history 补查最近记录；" +
+                    "通知已被清除、正文不含消息详情或只提示条数，或要看更完整会话时，再打开该应用：聊天列表第一项通常是最近会话，进入后按屏幕内容读取最新消息；" +
+                    "用时间戳判断消息新旧，不要把很久前的通知当作最新消息；" +
                     "成功的点击、输入或打开应用后，不要例行调用 observe_screen、wait、wait_for_text 或 wait_for_package；" +
                     "执行连续的 GUI 步骤（如打开应用→点搜索→输入→点结果）时，一次性规划全部步骤并连续调用工具，中间不要停下来观察或等待；" +
                     "只有任务需要读取或汇总屏幕信息、后续目标或界面状态未知、工具报告节点过期或结果不确定，" +

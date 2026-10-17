@@ -956,7 +956,7 @@ internal class AgentStructuredDeviceTools(
         if (!rootAvailable()) return listenerNotifications(packageFilter, limit)
         val listed = root.execute("cmd notification list", maxOutputBytes = 256 * 1024)
         if (!listed.ok) return rootError(listed)
-        val items = JSONArray()
+        val items = mutableListOf<JSONObject>()
         listed.stdout.lineSequence()
             .map(String::trim)
             .filter { it.isNotBlank() && (!packageFilter.isNotBlank() || "|$packageFilter|" in it) }
@@ -968,15 +968,19 @@ internal class AgentStructuredDeviceTools(
                 )
                 if (!detail.ok) return@forEach
                 val text = detail.stdout
-                items.put(
-                    JSONObject()
-                        .put("package_name", NOTIFICATION_PACKAGE.find(text)?.groupValues?.get(1).orEmpty())
-                        .put("title", notificationExtra(text, "android.title"))
-                        .put("text", notificationExtra(text, "android.text"))
-                        .put("sub_text", notificationExtra(text, "android.subText")),
-                )
+                val item = JSONObject()
+                    .put("package_name", NOTIFICATION_PACKAGE.find(text)?.groupValues?.get(1).orEmpty())
+                    .put("title", notificationExtra(text, "android.title"))
+                    .put("text", notificationExtra(text, "android.text"))
+                    .put("sub_text", notificationExtra(text, "android.subText"))
+                notificationWhen(text)?.let { postedAt -> item.put("posted_at", postedAt) }
+                items.add(item)
             }
-        return ok("recent_notifications").put("items", items).put("count", items.length()).toString()
+        val ordered = items.sortedWith(compareByDescending { it.optLong("posted_at") })
+        return ok("recent_notifications")
+            .put("items", JSONArray(ordered))
+            .put("count", ordered.size)
+            .toString()
     }
 
     private fun listenerNotifications(packageFilter: String, limit: Int): String {
@@ -1001,7 +1005,8 @@ internal class AgentStructuredDeviceTools(
                         .put("package_name", notification.packageName)
                         .put("title", extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().take(8_000))
                         .put("text", extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty().take(8_000))
-                        .put("sub_text", extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty().take(8_000)),
+                        .put("sub_text", extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty().take(8_000))
+                        .put("posted_at", notification.postTime),
                 )
             }
         return ok("recent_notifications")
@@ -1092,6 +1097,10 @@ internal class AgentStructuredDeviceTools(
     private fun notificationExtra(source: String, key: String): String? =
         Regex("""(?m)^\s*${Regex.escape(key)}=[^(]+\((.*)\)\s*$""")
             .find(source)?.groupValues?.get(1)?.takeUnless { it == "null" }
+
+    private fun notificationWhen(source: String): Long? =
+        Regex("""(?m)^\s*when=(\d{10,})""")
+            .find(source)?.groupValues?.get(1)?.toLongOrNull()
 
     private fun String.toCalendarDay(): Int = when (lowercase(Locale.ROOT)) {
         "sun" -> Calendar.SUNDAY

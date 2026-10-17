@@ -17,6 +17,44 @@ internal class AgentContextCompactor(
         sensitiveIds: Set<String>,
         force: Boolean = false,
     ): JSONArray {
+        val running = java.util.concurrent.atomic.AtomicBoolean(true)
+        val watchdog = startDeadlineWatchdog(running)
+        try {
+            return compactInternal(messages, systemCount, sensitiveIds, force)
+        } finally {
+            running.set(false)
+            watchdog.interrupt()
+        }
+    }
+
+    /**
+     * 摘要是一次网络请求，OkHttp 的 readTimeout 只防“完全没有数据”的静止，服务端边聊边发心跳
+     * 时它永不触发；所以给压缩加一道总时限兜底。超时只掐断在途请求（不取消整个 run），
+     * 让压缩走正常失败分支：界面得到明确失败文案，且本轮回答仍能交付。
+     * 周期触发是为了覆盖模型客户端的自动重试（重试会重新发起请求，可能再次卡住）。
+     */
+    private fun startDeadlineWatchdog(running: java.util.concurrent.atomic.AtomicBoolean): Thread =
+        Thread {
+            while (running.get()) {
+                try {
+                    Thread.sleep(COMPACTION_DEADLINE_MS)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+                if (running.get()) controller.abortInFlightRequests()
+            }
+        }.apply {
+            isDaemon = true
+            name = "eta-compaction-deadline"
+            start()
+        }
+
+    private fun compactInternal(
+        messages: JSONArray,
+        systemCount: Int,
+        sensitiveIds: Set<String>,
+        force: Boolean = false,
+    ): JSONArray {
         controller.throwIfCancelled()
         if (AnthropicEphemeralState.hasPendingToolResponse(messages)) {
             throw signedAnthropicToolRoundFailure()
@@ -41,8 +79,14 @@ internal class AgentContextCompactor(
                 end = safeEnds.firstOrNull { it > end } ?: break
             }
         }
+        val firstUser = history.indexOfFirst {
+            it.optString("role") == "user" && !it.has("_eta_observation")
+        }
         val protectedUser = history.getOrNull(latestUser)?.takeIf { latestUser < end }
-        val source = JSONArray(history.take(end).filterNot { it === protectedUser })
+        val protectedFirst = history.getOrNull(firstUser)?.takeIf {
+            firstUser >= 0 && firstUser < end && firstUser != latestUser
+        }
+        val source = JSONArray(history.take(end).filterNot { it === protectedUser || it === protectedFirst })
         val durable = AgentConversationCodec.transcript(source, 0, sensitiveIds)
         if (durable.isEmpty()) throw failure("CONTEXT_NOT_COMPACTABLE", "没有可压缩的历史内容。")
         val safe = durable.map { message ->
@@ -68,6 +112,7 @@ internal class AgentContextCompactor(
             compactedUserTurns = covered,
             summaryThroughUserTurn = covered + if (protectedUser != null) 1 else 0,
         )))
+        protectedFirst?.let(result::put)
         protectedUser?.let(result::put)
         history.drop(end).forEach { message ->
             // 新摘要改变了前缀；旧 opaque items 不再代表同一份 Provider 上下文。
@@ -83,6 +128,9 @@ internal class AgentContextCompactor(
     }
 
     companion object {
+        /** 压缩总时限：兜底防止“正在压缩上下文”永不结束（见 startDeadlineWatchdog）。 */
+        private const val COMPACTION_DEADLINE_MS = 150_000L
+
         fun signedAnthropicToolRoundFailure() = failure(
             "ANTHROPIC_THINKING_CONTEXT_LOCKED",
             "当前 Anthropic 工具回合的思考签名绑定原始上下文，提交工具结果前无法压缩上下文。",

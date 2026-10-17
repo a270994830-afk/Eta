@@ -158,6 +158,14 @@ internal class RootShellDeviceController(
         } else {
             null
         }
+        // 沉淀应用 UI 文档（异步）：供模型一次写出多步 flow，而不是每步都重新观察
+        elementObservation?.let { observation ->
+            AppUiDocument.record(
+                context = AgentAccessibilityService.current(),
+                packageName = observation.packageName,
+                nodes = observation.nodes,
+            )
+        }
         val nodes = elementObservation?.nodes.orEmpty()
         val capture = if (includeScreenshot) captureScreenshot() else ScreenCapture.notRequested()
         val image = capture.image
@@ -535,14 +543,16 @@ internal class RootShellDeviceController(
         val needle = text.trim()
         if (needle.isBlank()) return errorJson("INVALID_ARGUMENT", "text 不能为空")
         val timeout = timeoutMs.coerceIn(500, 60_000)
+        val startedAt = android.os.SystemClock.elapsedRealtime()
         val deadline = System.currentTimeMillis() + timeout
         var attempts = 0
         while (System.currentTimeMillis() <= deadline) {
             attempts++
             val service = AgentAccessibilityService.current()
             if (service == null && !rootAvailable()) return accessibilityUnavailable()
+            // mirrorNodes：内容代未变时直接读缓存（毫秒级），变了才重建
             val nodes = service
-                ?.queryNodes(120)
+                ?.mirrorNodes(120)
                 ?.map { it.toUiNode() }
                 ?.takeIf { it.isNotEmpty() }
                 ?: if (rootAvailable()) dumpUiNodes(120) else emptyList()
@@ -558,11 +568,15 @@ internal class RootShellDeviceController(
                     .put("ok", true)
                     .put("tool", "wait_for_text")
                     .put("attempts", attempts)
+                    .put("elapsed_ms", android.os.SystemClock.elapsedRealtime() - startedAt)
                     .put("matched_node", matchedNode)
                     .put("note", "等待查询不会发布元素快照；如需节点动作，请重新调用 observe_screen")
                     .toString()
             }
-            Thread.sleep(350)
+            // 事件驱动：界面一变立即醒；没变就等到剩余时间（单次上限 500ms，醒来后重新检查）
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) break
+            if (service != null) service.awaitTreeChange(remaining) else Thread.sleep(350)
         }
         return JSONObject()
             .put("ok", false)
@@ -570,6 +584,7 @@ internal class RootShellDeviceController(
             .put("code", "TIMEOUT")
             .put("message", "等待文本超时：$needle")
             .put("attempts", attempts)
+            .put("elapsed_ms", android.os.SystemClock.elapsedRealtime() - startedAt)
             .toString()
     }
 
@@ -1313,7 +1328,7 @@ internal class RootShellDeviceController(
         if (rootShellProcess?.isAlive == true && rootShellStdin != null && rootShellReader != null) return true
         closeRootShell()
         return runCatching {
-            val process = ProcessBuilder("su", "-c", "sh").redirectErrorStream(true).start()
+            val process = ProcessBuilder(RootSuResolver.command(), "-c", "sh").redirectErrorStream(true).start()
             rootShellProcess = process
             rootShellStdin = process.outputStream
             rootShellReader = process.inputStream.bufferedReader(Charsets.UTF_8)

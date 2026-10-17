@@ -20,6 +20,7 @@ import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -40,9 +41,16 @@ import io.github.mangi.eta.agent.overlay.AgentOverlayGlow
 import io.github.mangi.eta.agent.overlay.AgentOverlayOrb
 import io.github.mangi.eta.agent.overlay.AgentResultCard
 import io.github.mangi.eta.agent.overlay.AgentOverlayPhase
+import io.github.mangi.eta.agent.pet.AgentPet
+import io.github.mangi.eta.agent.pet.AgentPetMood
 import io.github.mangi.eta.agent.overlay.AgentOverlayState
 import io.github.mangi.eta.agent.overlay.AgentOverlayStatus
 import io.github.mangi.eta.agent.overlay.AgentOverlayVisibilityPolicy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import io.github.mangi.eta.agent.overlay.applyEvent
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.core.AndroidAgentLogger
@@ -71,6 +79,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         get() = savedStateRegistryController.savedStateRegistry
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val petSyncScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val resultIo = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "agent-result-io") }
     private val serviceMessenger = Messenger(IncomingHandler())
 
@@ -111,6 +120,26 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        observeOverlayPhaseForPet()
+    }
+
+    /** 把 Agent 运行阶段映射成桌宠情绪；桌宠关着时不做任何事。 */
+    private fun observeOverlayPhaseForPet() {
+        petSyncScope.launch {
+            snapshotFlow { state.value.phase }
+                .distinctUntilChanged()
+                .collect { phase ->
+                    if (!AgentPet.isEnabled()) return@collect
+                    AgentPet.setMood(
+                        when (phase) {
+                            AgentOverlayPhase.RUNNING -> AgentPetMood.WORKING
+                            AgentOverlayPhase.PAUSED -> AgentPetMood.THINKING
+                            AgentOverlayPhase.FINISHED -> AgentPetMood.SUCCESS
+                            AgentOverlayPhase.FAILED -> AgentPetMood.ERROR
+                        },
+                    )
+                }
+        }
     }
 
     override fun onBind(intent: Intent): IBinder? {

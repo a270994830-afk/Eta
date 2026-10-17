@@ -436,7 +436,7 @@ internal object XiaoAiHooks {
             description = "XiaoAi MiSpeechEngine session clear",
         ) { chain ->
             // BACK 关闭小爱浮层也会清理 session；这里只分离入口 UI，不能取消仍在执行的 Runtime。
-            rendererSlot.detach()?.cancel(classLoader)
+            rendererSlot.detach()?.cancel()
             queryCache.clear()
             turnTracker.clear()
             claimedDialogIds.clear()
@@ -547,7 +547,7 @@ internal object XiaoAiHooks {
         run.future.set(future)
         rendererSlot.attach(renderer)?.cancel()
         val previous = activeRun.replace(run)
-        previous?.cancel(logger, classLoader)
+        previous?.cancel(logger)
         claimedDialogIds.add(dialogId)
         run.activate()
         logger.info("已接管超级小爱请求: images=${if (image == null) 0 else 1}")
@@ -752,12 +752,12 @@ internal object XiaoAiHooks {
         fun awaitActivation(): Boolean =
             activation.await(ACTIVATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
-        fun cancel(logger: ModuleLogger, classLoader: ClassLoader) {
+        fun cancel(logger: ModuleLogger) {
             if (!cancelled.compareAndSet(false, true)) return
             activation.countDown()
             client.get()?.cancelRun(runId)
             future.get()?.cancel(true)
-            renderer.cancel(classLoader)
+            renderer.cancel()
             logger.debug { "超级小爱请求已取消" }
         }
 

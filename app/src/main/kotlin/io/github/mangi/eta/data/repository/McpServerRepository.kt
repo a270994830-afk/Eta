@@ -74,20 +74,36 @@ internal object McpServerRepository {
         update(server.copy(enabledToolNames = names))
     }
 
+    suspend fun setToolsEnabled(serverId: String, toolNames: Collection<String>, enabled: Boolean) {
+        val server = requireNotNull(serverById(serverId)) { "MCP 服务器不存在" }
+        val names = server.enabledToolNames.toMutableSet()
+        if (enabled) names += toolNames else names -= toolNames
+        update(server.copy(enabledToolNames = names))
+    }
+
     suspend fun delete(serverId: String) {
         val previous = requireNotNull(serverById(serverId)) { "MCP 服务器不存在" }
         val secretStore = secrets()
         val previousToken = secretStore.bearerToken(serverId)
-        secretStore.clear(serverId)
+        val previousHeaders = secretStore.customHeaders(serverId)
+        secretStore.clearAll(serverId)
         try {
             require(dao().delete(serverId) == 1) { "MCP 服务器不存在" }
         } catch (failure: Throwable) {
             runCatching { updateSecret(secretStore, previous, previousToken.orEmpty()) }
+            runCatching { secretStore.setCustomHeaders(serverId, previousHeaders) }
             throw failure
         }
     }
 
     fun bearerToken(serverId: String): String? = secrets().bearerToken(serverId)
+
+    fun customHeaders(serverId: String): Map<String, String> = secrets().customHeaders(serverId)
+
+    suspend fun setCustomHeaders(serverId: String, headers: Map<String, String>) {
+        requireNotNull(serverById(serverId)) { "MCP 服务器不存在" }
+        secrets().setCustomHeaders(serverId, headers)
+    }
 
     private fun updateSecret(
         secretStore: McpSecretStore,

@@ -9,7 +9,7 @@ internal object AgentTerminalToolCatalog {
             .put(
                 AgentToolSchema.function(
                     name = "terminal",
-                    description = "Manage terminal sessions on the current device. environment=android runs Android system commands and root operations; environment=linux runs the Alpine or Debian environment selected by the user. Apktool build is unavailable until an ARM64 AAPT2 runtime is installed. Use open_and_exec for one-shot commands. Use open to create a persistent shell session and exec with session_id for multi-step work. Use async=true without session_id for long-running independent commands, then read_async_result with job_id to stream output chunks. Use daemon_start for services that must keep running after the Agent run (listening ports, web panels, watchers): the process detaches from any command shell, logs to a file, and survives until daemon_stop or device reboot. Manage daemons with daemon_list, daemon_logs and daemon_stop by task_id. Use close to stop jobs or close sessions.",
+                    description = "Manage terminal sessions on the current device. environment=android runs Android system commands and root operations; environment=linux runs the Alpine or Debian environment selected by the user. Apktool build is unavailable until an ARM64 AAPT2 runtime is installed. Use open_and_exec for one-shot commands. Use open to create a persistent shell session and exec with session_id for multi-step work. In a session, exec with wait=false starts a long or interactive command and returns immediately, then read_session streams the accumulated output (it reports completed and exit_code once the command finishes) and input writes a line to the running process stdin; use those for REPLs, ssh, ping, tail-like watchers instead of blocking exec. Use async=true without session_id for long-running independent commands, then read_async_result with job_id to stream output chunks. Use daemon_start for services that must keep running after the Agent run (listening ports, web panels, watchers): the process detaches from any command shell, logs to a file, and survives until daemon_stop or device reboot. Manage daemons with daemon_list, daemon_logs and daemon_stop by task_id. Use close to stop jobs or close sessions.",
                     parameters = JSONObject()
                         .put("type", "object")
                         .put(
@@ -25,6 +25,8 @@ internal object AgentTerminalToolCatalog {
                                                 .put("open")
                                                 .put("exec")
                                                 .put("open_and_exec")
+                                                .put("read_session")
+                                                .put("input")
                                                 .put("read_async_result")
                                                 .put("close")
                                                 .put("daemon_start")
@@ -32,7 +34,7 @@ internal object AgentTerminalToolCatalog {
                                                 .put("daemon_logs")
                                                 .put("daemon_stop")
                                         )
-                                        .put("description", "open creates a session. exec runs command in a session or cwd. open_and_exec runs a one-shot command. read_async_result reads async output by job_id. close closes a session_id or job_id. daemon_start launches a detached long-lived service and returns task_id. daemon_list lists daemon tasks with liveness. daemon_logs tails a task log. daemon_stop terminates and removes a task.")
+                                        .put("description", "open creates a session. exec runs command in a session or cwd; with session_id and wait=false it starts a long or interactive command and returns immediately. open_and_exec runs a one-shot command. read_session streams a session's accumulated output and reports completion/exit_code. input writes command text plus a newline to the running foreground process stdin. read_async_result reads async output by job_id. close closes a session_id or job_id. daemon_start launches a detached long-lived service and returns task_id. daemon_list lists daemon tasks with liveness. daemon_logs tails a task log. daemon_stop terminates and removes a task.")
                                 )
                                 .put(
                                     "identity",
@@ -52,7 +54,7 @@ internal object AgentTerminalToolCatalog {
                                     "command",
                                     JSONObject()
                                         .put("type", "string")
-                                        .put("description", "Android shell command to execute. Required for exec/open_and_exec.")
+                                        .put("description", "Android shell command to execute. Required for exec/open_and_exec. For action=input it is the text to write to the session stdin.")
                                 )
                                 .put(
                                     "cwd",
@@ -76,7 +78,7 @@ internal object AgentTerminalToolCatalog {
                                     "session_id",
                                     JSONObject()
                                         .put("type", "string")
-                                        .put("description", "Session id returned by action=open. Use with exec or close.")
+                                        .put("description", "Session id returned by action=open. Use with exec, read_session, input or close.")
                                 )
                                 .put(
                                     "job_id",
@@ -97,16 +99,22 @@ internal object AgentTerminalToolCatalog {
                                         .put("description", "Start command in a separate background shell and return immediately with job_id. Do not combine with session_id. Use read_async_result to stream output.")
                                 )
                                 .put(
+                                    "wait",
+                                    JSONObject()
+                                        .put("type", "boolean")
+                                        .put("description", "For exec with session_id: false starts the command without waiting (long or interactive work), returning in_flight=true; poll output with read_session and write input with input. Default true.")
+                                )
+                                .put(
                                     "offset_chars",
                                     JSONObject()
                                         .put("type", "integer")
-                                        .put("description", "For read_async_result, read stdout from this character offset. Default 0.")
+                                        .put("description", "For read_async_result or read_session, read stdout from this character offset. Default 0.")
                                 )
                                 .put(
                                     "max_chars",
                                     JSONObject()
                                         .put("type", "integer")
-                                        .put("description", "For read_async_result, maximum stdout characters to return. Default 8000, max 16000.")
+                                        .put("description", "For read_async_result or read_session, maximum stdout characters to return. Default 8000, max 16000.")
                                 )
                                 .put(
                                     "close_if_done",

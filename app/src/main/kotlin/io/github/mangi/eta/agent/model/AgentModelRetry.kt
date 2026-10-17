@@ -24,12 +24,27 @@ internal class AgentModelRetry(
         var retries = 0
         while (true) {
             controller.throwIfCancelled()
+            AgentDailyTokenGuard.checkOrThrow()
+            AgentRateLimiter.checkOrThrow(rateLimitKey(request))
             onEvent(AgentEvent.RoundStarted(round, request.messages.length()))
             var hostedToolStarted = false
             var callbackFailed = false
             try {
                 val response = provider.complete(request, controller) { event ->
                     if (event is ProviderEvent.HostedToolStarted) hostedToolStarted = true
+                    if (event is ProviderEvent.Usage) {
+                        AgentDailyTokenGuard.record(
+                            event.usage.inputTokens,
+                            event.usage.outputTokens,
+                            event.usage.reasoningTokens,
+                        )
+                        AgentUsageTracker.record(
+                            modelId = request.config.model,
+                            inputTokens = event.usage.inputTokens,
+                            outputTokens = event.usage.outputTokens,
+                            reasoningTokens = event.usage.reasoningTokens,
+                        )
+                    }
                     try {
                         onProviderEvent(round, event)
                     } catch (failure: Exception) {
@@ -68,5 +83,12 @@ internal class AgentModelRetry(
     companion object {
         private const val MAX_RETRIES = 3
         private const val BASE_DELAY_MS = 2_000L
+
+        /** 限流按 provider 维度统计；providerId 为空时退化为 baseUrl 主机名。 */
+        private fun rateLimitKey(request: ProviderRequest): String {
+            val config = request.config
+            if (config.providerId.isNotBlank()) return config.providerId
+            return runCatching { java.net.URI(config.baseUrl).host ?: config.baseUrl }.getOrDefault(config.baseUrl)
+        }
     }
 }

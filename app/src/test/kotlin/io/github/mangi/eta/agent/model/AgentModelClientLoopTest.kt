@@ -482,8 +482,8 @@ class AgentModelClientLoopTest {
     }
 
     @Test
-    fun contradictoryStopReasonNeverExecutesToolCalls() {
-        listOf("stop", "content_filter", "refusal").forEach { finishReason ->
+    fun refusalStopReasonNeverExecutesToolCalls() {
+        listOf("content_filter", "refusal").forEach { finishReason ->
             val provider = ScriptedProvider(
                 assistant(
                     finishReason = finishReason,
@@ -510,6 +510,32 @@ class AgentModelClientLoopTest {
                     .getString("content")
                     .contains("UNEXPECTED_TOOL_CALL")
             )
+        }
+    }
+
+    @Test
+    fun benignStopReasonStillExecutesToolCalls() {
+        listOf("stop", "", "weird").forEach { finishReason ->
+            val provider = ScriptedProvider(
+                assistant(
+                    finishReason = finishReason,
+                    toolCalls = listOf(toolCall("call-1", "get_current_context", "{}")),
+                ),
+                assistant(content = "完成", finishReason = "stop"),
+            )
+            var executions = 0
+
+            AgentModelClient.complete(
+                config = modelConfig(),
+                prompt = "开始",
+                toolExecutor = AgentModelClient.ToolExecutor {
+                    executions += 1
+                    AgentModelClient.ToolResult("{\"ok\":true}")
+                },
+                provider = provider,
+            )
+
+            assertEquals(1, executions)
         }
     }
 

@@ -14,6 +14,9 @@ activityCompose = "1.13.0"
 markdownRenderer = "0.43.0"
 datastore = "1.2.1"
 okhttp = "5.4.0"
+# Operit 外观层需要的玻璃特效库（均为 Apache-2.0）
+liquid = "1.1.1"
+backdrop = "1.0.6"
 kotlinx-serialization = "1.11.0"
 kotlinx-coroutines = "1.11.0"
 material3 = "1.4.0"
@@ -50,6 +53,8 @@ room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+liquid = { group = "io.github.fletchmckee.liquid", name = "liquid", version.ref = "liquid" }
+backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
 okhttp-sse = { group = "com.squareup.okhttp3", name = "okhttp-sse", version.ref = "okhttp" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinx-serialization" }

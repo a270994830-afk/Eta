@@ -15,6 +15,7 @@ internal object AgentToolCatalog {
         skillGitHubInstall: Boolean = false,
         memoryTools: Boolean = false,
         memoryWritable: Boolean = true,
+        shadowTools: Boolean = false,
         capabilities: AgentToolCapabilities = AgentToolCapabilities(rootAvailable = true),
     ): JSONArray =
         capabilities.project(JSONArray().also { tools ->
@@ -29,15 +30,38 @@ internal object AgentToolCatalog {
                 sensitiveActionTools = deviceSensitiveActionTools,
             )
             if (browserTools) AgentBrowserToolCatalog.appendTo(tools)
+            if (shadowTools) AgentShadowToolCatalog.appendTo(tools)
             AgentSkillToolCatalog.appendTo(
                 tools,
                 githubDiscovery = skillGitHubDiscovery,
                 githubInstall = skillGitHubInstall,
             )
             if (memoryTools) AgentMemoryToolCatalog.appendTo(tools, writable = memoryWritable)
+            AgentAdminToolCatalog.appendTo(tools)
+            AgentSessionToolCatalog.appendTo(tools)
+            AgentMediaToolCatalog.appendTo(tools)
+            AgentIntegrationToolCatalog.appendTo(tools)
+            AgentPreferenceToolCatalog.appendTo(tools)
+            AgentWorkflowToolCatalog.appendTo(tools)
+            AgentBluetoothToolCatalog.appendTo(tools)
+            AgentToolPackToolCatalog.appendTo(tools)
+            AgentUpdateToolCatalog.appendTo(tools)
+            AgentRecordingToolCatalog.appendTo(tools)
+            AgentShizukuToolCatalog.appendTo(tools)
+            AgentPrivilegedToolCatalog.appendTo(tools)
+            AgentPetToolCatalog.appendTo(tools)
+            AgentAppUiDocToolCatalog.appendTo(tools)
+            // 插件包动态工具（tool_packs/*.json）：解析失败不影响内置目录
+            runCatching {
+                val packTools = io.github.mangi.eta.agent.tool.AgentToolPackManager.toolDefinitions()
+                for (index in 0 until packTools.length()) {
+                    tools.put(packTools.opt(index))
+                }
+            }
             if (terminalTools) {
                 AgentFileVisionToolCatalog.appendTo(tools)
                 AgentTerminalToolCatalog.appendTo(tools)
+                AgentFileToolCatalog.appendTo(tools)
             }
         })
 }

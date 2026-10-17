@@ -108,6 +108,7 @@ internal object AgentRuntimeWire {
     private const val KEY_DEVICE_DIRECT_TOOLS = "device_direct_tools"
     private const val KEY_DEVICE_SENSITIVE_READ_TOOLS = "device_sensitive_read_tools"
     private const val KEY_DEVICE_SENSITIVE_ACTION_TOOLS = "device_sensitive_action_tools"
+    private const val KEY_SHADOW_TOOLS = "shadow_tools"
     private const val KEY_THINKING_ENABLED = "thinking_enabled"
     private const val KEY_REASONING_EFFORT = "reasoning_effort"
     private const val KEY_REASONING_CAPABILITIES_JSON = "reasoning_capabilities_json"
@@ -308,6 +309,7 @@ internal object AgentRuntimeWire {
         putBoolean(KEY_DEVICE_DIRECT_TOOLS, request.config.deviceDirectTools)
         putBoolean(KEY_DEVICE_SENSITIVE_READ_TOOLS, request.config.deviceSensitiveReadTools)
         putBoolean(KEY_DEVICE_SENSITIVE_ACTION_TOOLS, request.config.deviceSensitiveActionTools)
+        putBoolean(KEY_SHADOW_TOOLS, request.config.shadowTools)
         putBoolean(KEY_THINKING_ENABLED, request.config.effectiveReasoningEffort.enablesReasoning)
         putString(KEY_REASONING_EFFORT, request.config.effectiveReasoningEffort.wireValue)
         request.config.reasoningCapabilities?.let {
@@ -451,6 +453,7 @@ internal object AgentRuntimeWire {
                     bundle.getBoolean(KEY_DEVICE_SENSITIVE_READ_TOOLS, false),
                 deviceSensitiveActionTools =
                     bundle.getBoolean(KEY_DEVICE_SENSITIVE_ACTION_TOOLS, false),
+                shadowTools = bundle.getBoolean(KEY_SHADOW_TOOLS, false),
                 thinkingEnabled = bundle.getBoolean(KEY_THINKING_ENABLED),
                 reasoningEffort = if (bundle.containsKey(KEY_REASONING_EFFORT)) {
                     ReasoningEffort.fromWireValue(bundle.getString(KEY_REASONING_EFFORT))

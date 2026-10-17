@@ -234,7 +234,7 @@ internal object AgentDeviceToolCatalog {
             .put(
                 function(
                     "recent_notifications",
-                    "读取当前通知栏中的通知标题与正文。结果不写入持久会话。",
+                    "读取当前通知栏中的通知标题、正文与时间戳（posted_at）。查看微信、QQ 等聊天应用的未读消息时优先调用本工具。结果不写入持久会话。",
                     properties(
                         "package_name" to string("可选的精确应用包名过滤", 255),
                         "limit" to integer("最多返回数量，默认 10", 1, 20),
@@ -244,7 +244,7 @@ internal object AgentDeviceToolCatalog {
             .put(
                 function(
                     "search_notification_history",
-                    "检索 Eta 在用户授予通知使用权后记录的最近 7 天通知。原始结果不写入持久会话。",
+                    "检索 Eta 在用户授予通知使用权后记录的最近 7 天通知（含时间戳 posted_at）。当前通知栏读不到时用它补查历史消息。原始结果不写入持久会话。",
                     properties(
                         "query" to string("可选标题或正文关键词", 200),
                         "package_name" to string("可选精确包名", 255),

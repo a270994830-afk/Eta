@@ -88,6 +88,7 @@ internal class RootShellTerminalController(
         closeIfDone: Boolean,
         environment: String = TerminalEnvironment.ANDROID.wireName,
         taskId: String? = null,
+        wait: Boolean = true,
     ): String {
         return when (action.lowercase()) {
             "open" -> openSession(identity = identity, cwd = cwd, environment = environment)
@@ -99,7 +100,8 @@ internal class RootShellTerminalController(
                 environment = environment,
                 mergeStderr = mergeStderr,
                 sessionId = sessionId,
-                async = async
+                async = async,
+                wait = wait
             )
             "open_and_exec" -> execInTerminal(
                 command = command,
@@ -109,7 +111,17 @@ internal class RootShellTerminalController(
                 environment = environment,
                 mergeStderr = mergeStderr,
                 sessionId = sessionId,
-                async = async
+                async = async,
+                wait = wait
+            )
+            "read_session" -> readSession(
+                sessionId = sessionId.orEmpty(),
+                offsetChars = offsetChars,
+                maxChars = maxChars,
+            )
+            "input" -> inputSession(
+                sessionId = sessionId.orEmpty(),
+                text = command,
             )
             "read_async_result" -> readAsyncResult(
                 jobId = jobId.orEmpty(),
@@ -129,7 +141,7 @@ internal class RootShellTerminalController(
             "daemon_stop" -> daemonStop(taskId = taskId.orEmpty())
             else -> errorJson(
                 "UNSUPPORTED_TERMINAL_ACTION",
-                "terminal action 仅支持 open/exec/open_and_exec/read_async_result/close/daemon_start/daemon_list/daemon_logs/daemon_stop"
+                "terminal action 仅支持 open/exec/open_and_exec/read_session/input/read_async_result/close/daemon_start/daemon_list/daemon_logs/daemon_stop"
             )
         }
     }
@@ -206,7 +218,8 @@ internal class RootShellTerminalController(
         environment: String,
         mergeStderr: Boolean,
         sessionId: String?,
-        async: Boolean
+        async: Boolean,
+        wait: Boolean,
     ): String {
         val session = sessionId?.takeIf { it.isNotBlank() }?.let { id ->
             synchronized(sessions) { sessions[id] }
@@ -234,6 +247,9 @@ internal class RootShellTerminalController(
             )
         }
         if (session != null) {
+            if (!wait) {
+                return startSessionCommand(session = session, command = command)
+            }
             return execInSession(
                 session = session,
                 command = command,
@@ -567,6 +583,150 @@ internal class RootShellTerminalController(
         processSupervisor.unregisterProcess(job.process)
     }
 
+    /**
+     * 非阻塞地在会话中启动命令（wait=false）：写入命令与状态标记后立即返回，
+     * 输出由 action=read_session 轮询、交互输入由 action=input 写入。
+     */
+    private fun startSessionCommand(session: TerminalSession, command: String): String {
+        val trimmed = command.trim()
+        if (trimmed.isBlank()) return errorJson("INVALID_ARGUMENT", "command 不能为空")
+        require(trimmed.length <= MAX_COMMAND_CHARS) { "command 过长：${trimmed.length}" }
+        synchronized(session.lock) {
+            if (session.closed || !session.process.isAlive) {
+                return errorJson("SESSION_CLOSED", "terminal session 已关闭")
+            }
+            if (session.inFlight != null) {
+                return errorJson("SESSION_BUSY", "会话已有未完成的前台命令；先用 action=read_session 取输出")
+            }
+            val marker = SessionStatusProtocol.newMarker()
+            session.stdout.clear()
+            session.stderr.clear()
+            session.lastExitCode = null
+            // 单行复合形式：状态 printf 与命令同一行，交互式前台进程读 stdin 时不会把状态行当成自己的输入。
+            val commandBlock = SessionStatusProtocol.commandLine(marker, trimmed) + "\n"
+            val failure = runCatching {
+                session.process.outputStream.write(commandBlock.toByteArray(Charsets.UTF_8))
+                session.process.outputStream.flush()
+            }.exceptionOrNull()
+            if (failure != null) {
+                session.closed = true
+                return errorJson("SESSION_WRITE_FAILED", failure.message ?: "写入会话失败")
+            }
+            session.inFlight = InFlightCommand(marker = marker, command = trimmed, startedAt = System.currentTimeMillis())
+        }
+        logger.info(
+            "Agent terminal action=exec outcome=streaming session=true identity=${session.identity} " +
+                "environment=${session.environment.wireName} commandChars=${trimmed.length}"
+        )
+        return JSONObject()
+            .put("ok", true)
+            .put("tool", "terminal")
+            .put("action", "exec")
+            .put("session_id", session.id)
+            .put("identity", session.identity)
+            .put("environment", session.environment.wireName)
+            .put("cwd", session.cwd)
+            .put("wait", false)
+            .put("in_flight", true)
+            .put(
+                "hint",
+                "命令已在会话中启动并立即返回；用 action=read_session 轮询输出（检测到完成会带 exit_code），" +
+                    "交互式进程用 action=input 写输入。"
+            )
+            .toString()
+    }
+
+    /** 取会话当前屏幕：返回已累积的输出，并在前台命令完成时给出 exit_code 与 cwd。 */
+    private fun readSession(sessionId: String, offsetChars: Int, maxChars: Int): String {
+        val session = sessionId.takeIf { it.isNotBlank() }?.let { id ->
+            synchronized(sessions) { sessions[id] }
+        } ?: return errorJson("SESSION_NOT_FOUND", "未找到 terminal session：$sessionId")
+        val limit = maxChars.coerceIn(1, MAX_ASYNC_OUTPUT_CHARS)
+        val offset = offsetChars.coerceAtLeast(0)
+        val rawStdout = session.stdout.text()
+        val rawStderr = session.stderr.text()
+        val inFlight = session.inFlight
+        var completedNow = false
+        if (inFlight != null) {
+            val status = rawStdout.lineSequence()
+                .firstOrNull { SessionStatusProtocol.isStatusLine(it, inFlight.marker) }
+                ?.let { SessionStatusProtocol.parseStatusLine(it, inFlight.marker) }
+            if (status != null) {
+                session.lastExitCode = status.exitCode
+                session.cwd = status.cwd ?: session.cwd
+                session.inFlight = null
+                completedNow = true
+            }
+        }
+        val marker = inFlight?.marker
+        val stdoutText = if (marker == null) {
+            rawStdout
+        } else {
+            rawStdout.lineSequence()
+                .filterNot { SessionStatusProtocol.isStatusLine(it, marker) }
+                .joinToString("\n")
+        }
+        val stdout = stdoutText.dropOffset(offset)
+        val stderr = rawStderr.dropOffset(offset)
+        logger.info(
+            "Agent terminal action=read_session completed=$completedNow inFlight=${session.inFlight != null} " +
+                "stdoutChars=${stdoutText.length} session=true"
+        )
+        return JSONObject()
+            .put("ok", true)
+            .put("tool", "terminal")
+            .put("action", "read_session")
+            .put("session_id", session.id)
+            .put("identity", session.identity)
+            .put("environment", session.environment.wireName)
+            .put("cwd", session.cwd)
+            .put("closed", session.closed || !session.process.isAlive)
+            .put("in_flight", session.inFlight != null)
+            .put("completed", completedNow || (session.inFlight == null && session.lastExitCode != null))
+            .put("exit_code", session.lastExitCode ?: JSONObject.NULL)
+            .put("stdout", stdout.truncateForJson())
+            .put("stdout_chars", stdoutText.length)
+            .put("stdout_offset", offset)
+            .put("stdout_truncated", offset + stdout.length < stdoutText.length)
+            .put("stderr", stderr.truncateForJson())
+            .put("stderr_chars", rawStderr.length)
+            .toString()
+    }
+
+    /** 向会话 stdin 写入一行输入，用于与交互式前台进程对话（仅在 wait=false 启动的命令运行期间有效）。 */
+    private fun inputSession(sessionId: String, text: String): String {
+        val session = sessionId.takeIf { it.isNotBlank() }?.let { id ->
+            synchronized(sessions) { sessions[id] }
+        } ?: return errorJson("SESSION_NOT_FOUND", "未找到 terminal session：$sessionId")
+        if (text.isEmpty()) return errorJson("INVALID_ARGUMENT", "需要提供 command 字段作为要写入会话 stdin 的文本")
+        if (session.closed || !session.process.isAlive) return errorJson("SESSION_CLOSED", "terminal session 已关闭")
+        if (session.inFlight == null) {
+            return errorJson(
+                "NO_FOREGROUND_COMMAND",
+                "会话没有正在运行的前台命令；请用 action=exec 发送命令，交互式命令用 wait=false 启动"
+            )
+        }
+        val failure = runCatching {
+            session.process.outputStream.write((text + "\n").toByteArray(Charsets.UTF_8))
+            session.process.outputStream.flush()
+        }.exceptionOrNull()
+        if (failure != null) {
+            session.closed = true
+            return errorJson("SESSION_WRITE_FAILED", failure.message ?: "写入会话失败")
+        }
+        logger.info("Agent terminal action=input writtenChars=${text.length} session=true")
+        return JSONObject()
+            .put("ok", true)
+            .put("tool", "terminal")
+            .put("action", "input")
+            .put("session_id", session.id)
+            .put("written_chars", text.length)
+            .put("hint", "输入已写入会话 stdin；用 action=read_session 查看进程响应")
+            .toString()
+    }
+
+    private fun String.dropOffset(offset: Int): String = if (offset <= 0) this else drop(offset)
+
     private fun execInSession(
         session: TerminalSession,
         command: String,
@@ -577,6 +737,12 @@ internal class RootShellTerminalController(
         if (trimmed.isBlank()) return errorJson("INVALID_ARGUMENT", "command 不能为空")
         require(trimmed.length <= MAX_COMMAND_CHARS) { "command 过长：${trimmed.length}" }
         val timeout = timeoutMs.coerceIn(1_000, MAX_TIMEOUT_SECONDS * 1000)
+        if (session.inFlight != null) {
+            return errorJson(
+                "SESSION_BUSY",
+                "会话有未完成的前台命令；先用 action=read_session 取输出（交互式进程用 action=input 写输入），完成后再发新命令"
+            )
+        }
         val result = runSessionCommand(session, trimmed, timeout)
         val outcome = when {
             result.timedOut -> "timed_out"
@@ -684,6 +850,7 @@ internal class RootShellTerminalController(
                         .joinToString("\n")
                         .trimEnd()
                     val stderrDelta = session.stderr.text().drop(stderrStart).trimEnd()
+                    session.lastExitCode = exitCode
                     session.stdout.clear()
                     session.stderr.clear()
                     return SessionCommandResult(
@@ -1051,6 +1218,12 @@ internal class RootShellTerminalController(
         val timedOut: Boolean
     )
 
+    private class InFlightCommand(
+        val marker: String,
+        val command: String,
+        val startedAt: Long,
+    )
+
     private class TerminalSession(
         val id: String,
         val identity: String,
@@ -1066,6 +1239,14 @@ internal class RootShellTerminalController(
 
         @Volatile
         var closed: Boolean = false
+
+        /** wait=false 启动、尚未看到状态行的前台命令。 */
+        @Volatile
+        var inFlight: InFlightCommand? = null
+
+        /** 最近一次前台命令的退出码；供 read_session 在命令结束后继续报告。 */
+        @Volatile
+        var lastExitCode: Int? = null
 
         lateinit var stdoutThread: Thread
         lateinit var stderrThread: Thread

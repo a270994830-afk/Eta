@@ -1,8 +1,71 @@
+import java.io.File
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+}
+
+// 影子屏 sidecar 载体的构建。
+//
+// carrier 源码编译为独立 dex 并打入 assets/carrier/carrier.dex，运行时由 root 解包供
+// app_process 加载。构建期找可用的 POSIX shell（容器/Linux 用 /bin/bash，Windows 用 Git Bash）
+// 调用构建脚本，由脚本结合 Android SDK（javac + d8）产出 dex；无可用 shell 时跳过并沿用已提交的 dex。
+val posixShell: String? = run {
+    val candidates = listOfNotNull(
+        System.getenv("GIT_INSTALL_ROOT")?.let { "$it/bin/bash.exe" },
+        "C:/Program Files/Git/bin/bash.exe",
+        "C:/Program Files (x86)/Git/bin/bash.exe",
+        "/bin/bash",
+    )
+    candidates.firstOrNull { File(it).isFile }
+}
+
+val androidSdkDir: String? = run {
+    val props = rootProject.file("local.properties")
+    if (props.isFile) {
+        props.readLines()
+            .firstOrNull { it.startsWith("sdk.dir=") }
+            ?.substringAfter("sdk.dir=")
+            ?.trim()
+            ?.replace("\\\\", "\\")
+            ?.replace("\\:", ":")
+            ?.replace("\\", "/")
+    } else {
+        System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME")
+    }
+}
+
+val carrierScript = rootProject.file("carrier/build_carrier.sh")
+val carrierSrcDir = rootProject.file("carrier/src")
+
+val carrierDexOutput = layout.projectDirectory.file("src/main/assets/carrier/carrier.dex")
+
+// 在配置期求值，避免执行期访问 project（与 configuration cache 冲突）。
+val carrierBuildEnabled = posixShell != null && carrierScript.isFile
+
+val buildCarrierDex = tasks.register<Exec>("buildCarrierDex") {
+    group = "shadow"
+    description = "编译影子屏 sidecar 载体到 assets/carrier/carrier.dex"
+    // 配置期即可确定的启用条件，避免执行期闭包捕获脚本对象（configuration cache 限制）。
+    enabled = carrierBuildEnabled
+    workingDir = rootProject.projectDir
+    commandLine(
+        buildList {
+            add(posixShell ?: "bash")
+            add(carrierScript.absolutePath)
+            androidSdkDir?.let { add(it) }
+        },
+    )
+    isIgnoreExitValue = true
+    inputs.file(carrierScript)
+    inputs.dir(carrierSrcDir)
+    outputs.file(carrierDexOutput)
+}
+
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+    dependsOn(buildCarrierDex)
 }
 
 val releaseStoreFile = System.getenv("ETA_RELEASE_STORE_FILE")
@@ -35,8 +98,8 @@ android {
             abiFilters += "arm64-v8a"
         }
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        versionCode = 2026092404
-        versionName = "3.0.5"
+        versionCode = 2026101201
+        versionName = "3.0.6"
     }
 
     signingConfigs {
@@ -128,6 +191,10 @@ dependencies {
     implementation(libs.material3)
     implementation(libs.hidden.api.bypass)
 
+    // Shizuku：免 Root 的 ADB/Root 特权通道（对齐 Operit 的 DEBUGGER 权限层级）
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+
     // DataStore：Provider / Model 结构化 JSON 与当前选中 ID 等键值
     implementation(libs.datastore.preferences)
 
@@ -137,6 +204,8 @@ dependencies {
 
     // OkHttp：替代 HttpURLConnection，支持 SSE
     implementation(libs.okhttp)
+    implementation(libs.liquid)
+    implementation(libs.backdrop)
     implementation(libs.okhttp.sse)
 
     // Kotlinx Serialization：Provider 设置与运行时配置 JSON

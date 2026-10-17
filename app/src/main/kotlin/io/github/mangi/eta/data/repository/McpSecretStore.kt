@@ -9,6 +9,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import org.json.JSONObject
 
 /** MCP 凭据只以 Android Keystore 密文保存在 App 私有偏好中。 */
 internal class McpSecretStore(context: Context) {
@@ -57,6 +58,63 @@ internal class McpSecretStore(context: Context) {
         check(preferences.edit().remove(tokenKey(serverId)).commit()) { "MCP 凭据删除失败" }
     }
 
+    /** 清除该服务器的全部凭据（Bearer Token 与自定义请求头）。 */
+    @Synchronized
+    fun clearAll(serverId: String) {
+        check(preferences.edit().remove(tokenKey(serverId)).remove(headerKey(serverId)).commit()) {
+            "MCP 凭据删除失败"
+        }
+    }
+
+    @Synchronized
+    fun customHeaders(serverId: String): Map<String, String> {
+        val encoded = preferences.getString(headerKey(serverId), null) ?: return emptyMap()
+        val plaintext = runCatching {
+            val payload = Base64.decode(encoded, Base64.NO_WRAP)
+            require(payload.size > GCM_IV_BYTES)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                secretKey(),
+                GCMParameterSpec(GCM_TAG_BITS, payload, 0, GCM_IV_BYTES),
+            )
+            cipher.doFinal(payload, GCM_IV_BYTES, payload.size - GCM_IV_BYTES)
+                .toString(Charsets.UTF_8)
+        }.getOrNull() ?: return emptyMap()
+        return runCatching {
+            val json = JSONObject(plaintext)
+            buildMap {
+                json.keys().forEach { key ->
+                    json.optString(key).takeIf { it.isNotBlank() }?.let { put(key, it) }
+                }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    @Synchronized
+    fun setCustomHeaders(serverId: String, headers: Map<String, String>) {
+        val normalized = headers
+            .mapKeys { it.key.trim() }
+            .filterKeys { it.isNotBlank() }
+            .filterValues { it.isNotBlank() }
+        if (normalized.isEmpty()) {
+            check(preferences.edit().remove(headerKey(serverId)).commit()) { "MCP 请求头删除失败" }
+            return
+        }
+        val json = JSONObject().also { target ->
+            normalized.forEach { (name, value) -> target.put(name, value) }
+        }
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+        val encrypted = cipher.doFinal(json.toString().toByteArray(Charsets.UTF_8))
+        val payload = cipher.iv + encrypted
+        check(
+            preferences.edit()
+            .putString(headerKey(serverId), Base64.encodeToString(payload, Base64.NO_WRAP))
+            .commit()
+        ) { "MCP 请求头保存失败" }
+    }
+
     private fun secretKey(): SecretKey {
         val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
         (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
@@ -76,6 +134,8 @@ internal class McpSecretStore(context: Context) {
     }
 
     private fun tokenKey(serverId: String): String = "bearer_$serverId"
+
+    private fun headerKey(serverId: String): String = "headers_$serverId"
 
     private companion object {
         const val PREFERENCES_NAME = "eta_mcp_secrets"

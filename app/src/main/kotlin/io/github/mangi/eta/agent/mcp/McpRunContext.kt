@@ -2,6 +2,7 @@ package io.github.mangi.eta.agent.mcp
 
 import android.util.Base64
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.data.model.McpProtocolMode
 import io.github.mangi.eta.data.model.McpServerSetting
 import io.github.mangi.eta.data.model.McpToolDefinition
@@ -15,6 +16,7 @@ internal class McpRunTool(
     val server: McpServerSetting,
     val definition: McpToolDefinition,
     val bearerToken: String?,
+    val customHeaders: Map<String, String> = emptyMap(),
 )
 
 /** 一次 run 使用冻结的 MCP 工具目录，设置变更从下一次 run 生效。 */
@@ -55,12 +57,13 @@ internal class McpRunSnapshot(
             val now = System.currentTimeMillis()
             McpServerRepository.enabledServers().forEach { configured ->
                 val bearerToken = McpServerRepository.bearerToken(configured.id)
+                val customHeaders = McpServerRepository.customHeaders(configured.id)
                 val needsRefresh = configured.lastProtocolVersion == null ||
                     configured.lastProtocolVersion == McpProtocolMode.LATEST &&
                     (configured.toolsExpireAt == null || configured.toolsExpireAt <= now)
                 val server = if (needsRefresh) {
                     runCatching {
-                        McpServerManager.discover(configured, bearerToken).also {
+                        McpServerManager.discover(configured, bearerToken, customHeaders).also {
                             McpServerRepository.update(it)
                         }
                     }.getOrNull()
@@ -75,6 +78,7 @@ internal class McpRunSnapshot(
                         server = server,
                         definition = tool,
                         bearerToken = bearerToken,
+                        customHeaders = customHeaders,
                     )
                 }
             }
@@ -95,15 +99,17 @@ internal class McpRunSnapshot(
             return "mcp_${serverPart}_${normalized}_$digest"
         }
 
-        private const val MAX_RUN_TOOLS = 64
+        private const val MAX_RUN_TOOLS = 512
     }
 }
 
 internal class McpToolExecutor(
     private val snapshot: McpRunSnapshot,
+    private val runId: String = "",
 ) : AgentModelClient.ToolExecutor, AutoCloseable {
     private val lifecycleLock = Any()
     private val clients = mutableMapOf<String, McpHttpClient>()
+    private val stdioSessions = mutableMapOf<String, McpStdioSession>()
     private var closed = false
 
     override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult {
@@ -113,15 +119,36 @@ internal class McpToolExecutor(
         )
         val arguments = runCatching { JSONObject(toolCall.argumentsJson.ifBlank { "{}" }) }
             .getOrElse { return failure("INVALID_ARGUMENT", "MCP 工具参数不是 JSON object") }
+        val gate = McpTradeConfirmationGate.evaluate(
+            enabled = Prefs.isEnabled(Prefs.Keys.MCP_CONFIRM_TRADES),
+            serverId = tool.server.id,
+            toolName = tool.definition.name,
+            readOnlyHint = tool.definition.readOnlyHint,
+            arguments = arguments,
+            runId = runId,
+        )
+        if (gate is McpTradeConfirmationGate.Decision.Block) {
+            return failure("MCP_CONFIRMATION_REQUIRED", gate.message)
+        }
         return runCatching {
-            val client = synchronized(lifecycleLock) {
-                if (closed) return failure("MCP_EXECUTOR_CLOSED", "MCP 工具执行器已关闭")
-                clients[tool.server.id] ?: McpHttpClient(
-                    server = tool.server,
-                    bearerToken = tool.bearerToken,
-                ).also { clients[tool.server.id] = it }
+            val raw = if (tool.server.url.startsWith(McpServerManager.STDIO_PREFIX)) {
+                val session = synchronized(lifecycleLock) {
+                    if (closed) return failure("MCP_EXECUTOR_CLOSED", "MCP 工具执行器已关闭")
+                    stdioSessions.getOrPut(tool.server.id) { McpStdioSession.of(tool.server.url) }
+                }
+                session.callTool(tool.definition, arguments)
+            } else {
+                val client = synchronized(lifecycleLock) {
+                    if (closed) return failure("MCP_EXECUTOR_CLOSED", "MCP 工具执行器已关闭")
+                    clients[tool.server.id] ?: McpHttpClient(
+                        server = tool.server,
+                        bearerToken = tool.bearerToken,
+                        customHeaders = tool.customHeaders,
+                    ).also { clients[tool.server.id] = it }
+                }
+                client.callTool(tool.definition, arguments)
             }
-            adaptResult(tool, client.callTool(tool.definition, arguments))
+            adaptResult(tool, raw)
         }.getOrElse {
             failure("MCP_CALL_FAILED", "MCP 工具调用失败")
         }
@@ -135,7 +162,11 @@ internal class McpToolExecutor(
             closed = true
             clients.values.toList().also { clients.clear() }
         }
+        val closingStdio = synchronized(lifecycleLock) {
+            stdioSessions.values.toList().also { stdioSessions.clear() }
+        }
         closing.forEach { runCatching { it.close() } }
+        closingStdio.forEach { runCatching { it.close() } }
     }
 
     private fun adaptResult(tool: McpRunTool, result: JSONObject): AgentModelClient.ToolResult {

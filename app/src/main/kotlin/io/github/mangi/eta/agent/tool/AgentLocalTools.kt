@@ -8,9 +8,11 @@ import android.net.Uri
 import android.os.SystemClock
 import io.github.mangi.eta.agent.browser.AgentBrowserSession
 import io.github.mangi.eta.agent.device.DeviceControlUnavailableException
+import io.github.mangi.eta.agent.device.PrivilegedShell
 import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.device.RootShellDeviceController
 import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
+import io.github.mangi.eta.agent.device.shadow.ShadowToolSet
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.model.AgentScreenObservationContract
 import io.github.mangi.eta.agent.model.AgentSensitiveToolPolicy
@@ -73,6 +75,11 @@ internal class AgentLocalTools(
     private val deviceSensitiveActionToolsEnabled: () -> Boolean = {
         Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS)
     },
+    private val shadowToolsEnabled: () -> Boolean = {
+        Prefs.isEnabled(Prefs.Keys.AGENT_SHADOW_TOOLS)
+    },
+    private val shadowSessionActive: () -> Boolean = { false },
+    private val authSource: () -> AgentAuthPolicy.Source = { AgentAuthPolicy.Source.CHAT },
     private val memoryToolsEnabled: () -> Boolean = {
         runBlocking { AgentMemoryRepository.isEnabled() }
     },
@@ -91,7 +98,7 @@ internal class AgentLocalTools(
     private val skillPackageInstaller: SkillPackageInstaller? = null,
     runAvailableSkillIds: Set<String> = emptySet(),
     pendingSkillConflict: PendingSkillConflictCapability? = null,
-    private val rootAvailable: () -> Boolean = { RootAccess.isGranted },
+    private val rootAvailable: () -> Boolean = { PrivilegedShell.available() },
 ) : AgentModelClient.ToolExecutor, AutoCloseable {
 
     private val closed = AtomicBoolean(false)
@@ -103,7 +110,39 @@ internal class AgentLocalTools(
         root = rootCommandExecutor,
         rootAvailable = rootAvailable,
     )
+    private val shadowTools = ShadowToolSet(
+        logger = logger,
+        rootCommandExecutor = rootCommandExecutor,
+        rootAvailable = rootAvailable,
+        context = context,
+    )
     private val imageTools = AgentImageTools(context, rootCommandExecutor, rootAvailable)
+    private val fileTools = AgentFileToolSet(context, logger, rootCommandExecutor, rootAvailable)
+    private val integrationTools = AgentIntegrationToolSet(
+        context = context,
+        logger = logger,
+        root = rootCommandExecutor,
+        rootAvailable = rootAvailable,
+        httpClient = io.github.mangi.eta.agent.model.AgentHttpClient.client,
+    )
+    private val adminTools = AgentAdminToolSet(context, logger)
+    private val sessionTools = AgentSessionToolSet(context, logger)
+    private val mediaTools = AgentMediaToolSet(context, logger)
+    private val bluetoothTools = AgentBluetoothToolSet(context, logger)
+    private val preferenceTools = AgentPreferenceToolSet(context, logger)
+    private val workflowTools = AgentWorkflowToolSet(
+        context = context,
+        logger = logger,
+        stepExecutor = { tool, args -> runWorkflowStep(tool, args) },
+        promptExecutor = { prompt -> runWorkflowPrompt(prompt) },
+    )
+    private val toolPackTools = AgentToolPackToolSet(context, logger)
+    private val updateTools = AgentUpdateToolSet(context, logger)
+    private val recordingTools = AgentRecordingToolSet(context, logger)
+    private val shizukuTools = AgentShizukuToolSet(logger)
+    private val privilegedTools = AgentPrivilegedToolSet(logger)
+    private val petTools = AgentPetToolSet(context, logger)
+    private val appUiDocTools = AgentAppUiDocToolSet(logger)
     private val terminalController = RootShellTerminalController(
         logger = logger,
         rootAvailable = rootAvailable,
@@ -143,6 +182,10 @@ internal class AgentLocalTools(
         publishedObservation.set(PublishedObservation())
         AgentBrowserSession.interruptAgentAction(browserRunId)
         terminalController.interruptAll()
+        // 影子屏持有系统级虚拟显示资源，必须在工具集关闭时一并回收，
+        // 避免 sidecar 进程存活到下一个任务周期之外。
+        runCatching { shadowTools.release() }
+            .onFailure { logger.warn("Agent shadow release failed on close message=${it.message}") }
         deviceController.close()
         rootCommandExecutor.close()
         githubSkillSource?.close()
@@ -166,6 +209,7 @@ internal class AgentLocalTools(
             }
             deviceToolPermissionError(toolCall.name)?.let { return@runCatching it }
             memoryToolPermissionError(toolCall.name)?.let { return@runCatching it }
+            toolPermissionError(toolCall.name)?.let { return@runCatching it }
             when (val decision = beforeToolExecution(toolCall.name)) {
                 ToolExecutionDecision.Allow -> Unit
                 is ToolExecutionDecision.Reject -> {
@@ -179,6 +223,7 @@ internal class AgentLocalTools(
                 }
             }
             val toolResult = when (toolCall.name) {
+                "tool_permission_approve" -> textResult(toolPermissionApprove(args))
                 "get_current_context" -> textResult(DeviceContextTool.current(context))                "search_apps" -> textResult(searchApps(args))
                 "launch_app" -> textResult(launchApp(args))
                 "open_uri" -> textResult(openUri(args))
@@ -190,6 +235,7 @@ internal class AgentLocalTools(
                 "tap_element" -> textResult(tapElement(args))
                 "long_press" -> textResult(longPress(args))
                 "long_press_element" -> textResult(longPressElement(args))
+                "double_tap" -> textResult(doubleTap(args))
                 "swipe" -> textResult(swipe(args))
                 "scroll" -> textResult(deviceController.scroll(args.optString("direction")))
                 "scroll_element" -> textResult(scrollElement(args))
@@ -204,6 +250,87 @@ internal class AgentLocalTools(
                 "wait_for_text" -> textResult(waitForText(args))
                 "wait_for_package" -> textResult(waitForPackage(args))
                 "open_system_panel" -> textResult(deviceController.openSystemPanel(args.optString("panel")))
+                "note_add" -> textResult(noteAdd(args))
+                "note_list" -> textResult(noteList())
+                "note_clear" -> textResult(noteClear())
+                "search_tools" -> textResult(AgentToolSearch.search(args.optString("query"), args.optInt("limit", 12)))
+                in AgentFileToolSet.TOOL_NAMES ->
+                    textResult(
+                        terminalTool {
+                            fileTools.execute(toolCall.name, args)
+                                ?: errorResult("UNKNOWN_TOOL", "未知文件工具：${toolCall.name}")
+                        }
+                    )
+                in AgentIntegrationToolSet.TOOL_NAMES ->
+                    textResult(
+                        integrationTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知集成工具：${toolCall.name}")
+                    )
+                in AgentAdminToolSet.TOOL_NAMES ->
+                    textResult(
+                        adminTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知管理工具：${toolCall.name}")
+                    )
+                in AgentSessionToolSet.TOOL_NAMES ->
+                    textResult(
+                        sessionTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知会话工具：${toolCall.name}")
+                    )
+                in AgentMediaToolSet.TOOL_NAMES ->
+                    textResult(
+                        mediaTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知媒体工具：${toolCall.name}")
+                    )
+                in AgentBluetoothToolSet.TOOL_NAMES ->
+                    textResult(
+                        bluetoothTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知蓝牙工具：${toolCall.name}")
+                    )
+                in AgentPreferenceToolSet.TOOL_NAMES ->
+                    textResult(
+                        preferenceTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知偏好工具：${toolCall.name}")
+                    )
+                in AgentWorkflowToolSet.TOOL_NAMES ->
+                    textResult(
+                        workflowTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知工作流工具：${toolCall.name}")
+                    )
+                in AgentToolPackToolSet.TOOL_NAMES ->
+                    textResult(
+                        toolPackTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知插件包工具：${toolCall.name}")
+                    )
+                in AgentUpdateToolSet.TOOL_NAMES ->
+                    textResult(
+                        updateTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知更新工具：${toolCall.name}")
+                    )
+                in AgentRecordingToolSet.TOOL_NAMES ->
+                    textResult(
+                        recordingTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知录屏工具：${toolCall.name}")
+                    )
+                in AgentShizukuToolSet.TOOL_NAMES ->
+                    textResult(
+                        shizukuTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知 Shizuku 工具：${toolCall.name}")
+                    )
+                in AgentPrivilegedToolSet.TOOL_NAMES ->
+                    textResult(
+                        privilegedTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知特权工具：${toolCall.name}")
+                    )
+                in AgentPetToolSet.TOOL_NAMES ->
+                    textResult(
+                        petTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知桌宠工具：${toolCall.name}")
+                    )
+                in AgentAppUiDocToolSet.TOOL_NAMES ->
+                    textResult(
+                        appUiDocTools.execute(toolCall.name, args)
+                            ?: errorResult("UNKNOWN_TOOL", "未知应用文档工具：${toolCall.name}")
+                    )
                 "flow_start_recording" -> textResult(flowStartRecording(args))
                 "flow_stop_recording" -> textResult(flowStopRecording(args))
                 "flows_list" -> textResult(flowsList())
@@ -213,6 +340,9 @@ internal class AgentLocalTools(
                 in DEVICE_TOOL_NAMES ->
                     structuredDeviceTools.execute(toolCall.name, args)
                         ?: textResult(errorResult("UNKNOWN_TOOL", "未知设备工具"))
+                in ShadowToolSet.SHADOW_TOOL_NAMES ->
+                    shadowTools.execute(toolCall.name, args)
+                        ?: textResult(errorResult("UNKNOWN_TOOL", "未知影子屏工具"))
                 "ocr_screen" -> textResult(ocrScreen())
                 "read_image" -> fileVisionTool { imageTools.readImage(args) }
                 "terminal" -> textResult(terminalTool { terminal(args) })
@@ -228,12 +358,14 @@ internal class AgentLocalTools(
                 "skills_list_curated" -> textResult(skillsListCurated())
                 "skills_inspect_github" -> textResult(skillsInspectGitHub(args))
                 "skills_install_from_github" -> textResult(skillsInstallFromGitHub(args))
-                else -> textResult(
-                    errorResult(
-                        code = "UNKNOWN_TOOL",
-                        message = "未知工具：${toolCall.name}"
+                else -> (toolPackTools.execute(toolCall.name, args)
+                    ?: AgentToolPackManager.execute(toolCall.name, args))?.let { textResult(it) }
+                    ?: textResult(
+                        errorResult(
+                            code = "UNKNOWN_TOOL",
+                            message = "未知工具：${toolCall.name}"
+                        )
                     )
-                )
             }
             recordGuiStepIfNeeded(toolCall.name, args, toolResult)
             toolResult
@@ -256,6 +388,27 @@ internal class AgentLocalTools(
             }
         }
 
+    /** 工具级权限闸门（allow/ask/forbid）；权限管理类工具本身不受限，避免死锁。 */
+    private fun toolPermissionError(toolName: String): AgentModelClient.ToolResult? {
+        if (toolName in PERMISSION_EXEMPT_TOOLS || toolName == "tool_permission_approve") return null
+        val error = AgentToolPermissionStore.checkError(toolName) ?: return null
+        return AgentModelClient.ToolResult(error)
+    }
+
+    /** 授权工具：卡片 UI 不可用时，由外部/MCP 客户端替代用户完成一次授权。 */
+    private fun toolPermissionApprove(args: JSONObject): String {
+        val toolName = args.optString("tool_name").trim()
+        if (toolName.isEmpty()) return errorResult("INVALID_ARGUMENT", "需要 tool_name")
+        val scope = args.optString("scope", AgentToolPermissionStore.SCOPE_ONCE).trim().lowercase()
+        if (!AgentToolPermissionStore.grantTemporary(toolName, scope)) {
+            return errorResult("INVALID_ARGUMENT", "scope 必须是 once/session/always")
+        }
+        return AgentToolPermissionStore.snapshot()
+            .put("approved", toolName)
+            .put("scope", scope)
+            .toString()
+    }
+
     private fun deviceToolPermissionError(
         toolName: String,
     ): AgentModelClient.ToolResult? {
@@ -266,6 +419,8 @@ internal class AgentLocalTools(
                 "DEVICE_SENSITIVE_READ_TOOLS_DISABLED" to "请先允许读取敏感设备信息"
             toolName in DEVICE_SENSITIVE_ACTION_TOOL_NAMES && !deviceSensitiveActionToolsEnabled() ->
                 "DEVICE_SENSITIVE_ACTION_TOOLS_DISABLED" to "请先允许敏感设备操作"
+            toolName in ShadowToolSet.SHADOW_TOOL_NAMES && !shadowToolsEnabled() ->
+                "SHADOW_TOOLS_DISABLED" to "请先在设置中开启影子屏工具"
             else -> null
         } ?: return null
         return AgentModelClient.ToolResult(
@@ -545,6 +700,62 @@ internal class AgentLocalTools(
         AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.LONG_PRESS)
         showLongPress(point.x, point.y, durationMs)
         return deviceController.longPress(point.x, point.y, durationMs)
+    }
+
+    private fun doubleTap(args: JSONObject): String {
+        val point = convertPoint(
+            x = args.optInt("x"),
+            y = args.optInt("y"),
+            coordinateSpace = args.optString("coordinate_space")
+        )
+        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+        showTap(point.x, point.y)
+        val first = deviceController.tap(point.x, point.y, 50L)
+        deviceController.waitMs(90)
+        val second = deviceController.tap(point.x, point.y, 50L)
+        return "双击完成：(${point.x}, ${point.y})；tap1=$first；tap2=$second"
+    }
+
+    private fun notesFile(): java.io.File = java.io.File(context.filesDir, "agent_notes.json")
+
+    private fun readNotes(): JSONArray {
+        return try {
+            val f = notesFile()
+            if (!f.exists()) JSONArray() else JSONArray(f.readText())
+        } catch (e: Exception) {
+            JSONArray()
+        }
+    }
+
+    private fun writeNotes(notes: JSONArray) {
+        try {
+            notesFile().writeText(notes.toString())
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun noteAdd(args: JSONObject): String {
+        val text = args.optString("text").trim()
+        if (text.isEmpty()) return errorResult("INVALID_PARAM", "text 不能为空")
+        val notes = readNotes()
+        notes.put(text)
+        writeNotes(notes)
+        return "已记录备忘（共 ${notes.length()} 条）：$text"
+    }
+
+    private fun noteList(): String {
+        val notes = readNotes()
+        if (notes.length() == 0) return "暂无备忘"
+        val sb = StringBuilder("备忘（${notes.length()} 条）：")
+        for (i in 0 until notes.length()) {
+            sb.append("\n").append(i + 1).append(". ").append(notes.optString(i))
+        }
+        return sb.toString()
+    }
+
+    private fun noteClear(): String {
+        writeNotes(JSONArray())
+        return "已清空备忘"
     }
 
     private fun swipe(args: JSONObject): String {
@@ -977,6 +1188,10 @@ internal class AgentLocalTools(
 
     private fun semanticStepFor(toolName: String, args: JSONObject): AgentFlowStore.FlowStep? {
         return when (toolName) {
+            "double_tap" -> AgentFlowStore.FlowStep(
+                "double_tap",
+                JSONObject().put("x", args.optInt("x")).put("y", args.optInt("y")),
+            )
             "launch_app" -> AgentFlowStore.FlowStep(
                 "launch_app",
                 JSONObject().put("package_name", args.optString("package_name")),
@@ -1142,12 +1357,21 @@ internal class AgentLocalTools(
         }
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         context.startActivity(launchIntent)
-        logger.info("Agent local tool action=launch_app outcome=started")
+        // R2 启动真结果校验：等待应用真正到前台（最多 4 秒），避免“发了就算成功”
+        val verify = runCatching { deviceController.waitForPackage(app.packageName, 4_000) }.getOrDefault("")
+        val launchVerified = verify.contains("\"ok\":true")
+        logger.info("Agent local tool action=launch_app outcome=started launch_verified=$launchVerified")
         return JSONObject()
             .put("ok", true)
             .put("tool", "launch_app")
             .put("app_name", app.appName)
             .put("package_name", app.packageName)
+            .put("launch_verified", launchVerified)
+            .put(
+                "message",
+                if (launchVerified) "已启动并确认到前台：${app.appName}"
+                else "已发出启动，但 4 秒内未确认 ${app.appName} 到前台（可用 wait_for_package/observe_screen 复核）"
+            )
             .toString()
     }
 
@@ -1203,6 +1427,7 @@ internal class AgentLocalTools(
             closeIfDone = args.optBoolean("close_if_done", false),
             environment = args.optString("environment", "android"),
             taskId = args.optString("task_id").ifBlank { null },
+            wait = args.optBoolean("wait", true),
         )
     }
 
@@ -1779,6 +2004,30 @@ internal class AgentLocalTools(
         errorResult(failure.code, failure.message ?: "GitHub Skill 请求失败")
     }
 
+    /** 工作流步骤执行：复用同一套工具分发；禁止步骤内再触发工作流（防递归）。 */
+    private fun runWorkflowStep(tool: String, args: JSONObject): String {
+        if (tool.startsWith("workflow_")) {
+            return errorResult("WORKFLOW_REENTRANCY", "工作流步骤内不能再调用工作流工具")
+        }
+        return execute(
+            AgentModelClient.ToolCall(
+                id = "wf-step-${System.nanoTime()}",
+                name = tool,
+                argumentsJson = args.toString(),
+            )
+        ).content
+    }
+
+    /** 工作流里的 prompt 步：跑一轮最小 agent（带工具）并返回最终文本。 */
+    private fun runWorkflowPrompt(prompt: String): String = runCatching {
+        AgentModelClient.complete(
+            config = AgentModelClient.loadConfig(),
+            prompt = prompt,
+            toolExecutor = this,
+            sessionId = "workflow-${java.util.UUID.randomUUID()}",
+        ).content
+    }.getOrElse { errorResult("WORKFLOW_PROMPT_FAILED", it.message ?: "prompt 步执行失败") }
+
     private fun errorResult(code: String, message: String): String =
         JSONObject()
             .put("ok", false)
@@ -1823,6 +2072,12 @@ internal class AgentLocalTools(
     )
 
     private companion object {
+        /** 权限管理类工具本身不受工具权限闸门限制，否则 ask 策略会死锁。 */
+        val PERMISSION_EXEMPT_TOOLS = setOf(
+            "tool_permission_list",
+            "tool_permission_set",
+            "search_tools",
+        )
         val DEVICE_DIRECT_TOOL_NAMES = setOf(
             "set_alarm",
             "set_timer",

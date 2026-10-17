@@ -261,5 +261,37 @@ internal object AgentTextSystemToolCatalog {
                         .put("required", JSONArray().put("panel"))
                 )
             )
+            .put(
+                AgentToolSchema.function(
+                    name = "note_add",
+                    description = "记录一条备忘/中间结论（跨任务保留，供后续读取）。任务中需要记住的信息随手记。",
+                    parameters = JSONObject()
+                        .put("type", "object")
+                        .put(
+                            "properties",
+                            JSONObject()
+                                .put("text", JSONObject().put("type", "string").put("description", "备忘内容"))
+                        )
+                        .put("required", JSONArray().put("text"))
+                )
+            )
+            .put(
+                AgentToolSchema.function(
+                    name = "note_list",
+                    description = "列出已记录的备忘。",
+                    parameters = JSONObject()
+                        .put("type", "object")
+                        .put("properties", JSONObject())
+                )
+            )
+            .put(
+                AgentToolSchema.function(
+                    name = "note_clear",
+                    description = "清空全部备忘。",
+                    parameters = JSONObject()
+                        .put("type", "object")
+                        .put("properties", JSONObject())
+                )
+            )
     }
 }

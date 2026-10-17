@@ -35,6 +35,8 @@ internal object AgentBrowserToolCatalog {
                                             .put("go_forward")
                                             .put("reload")
                                             .put("wait_for_selector")
+                                            .put("evaluate")
+                                            .put("get_html")
                                     )
                             )
                             .put(
@@ -54,6 +56,12 @@ internal object AgentBrowserToolCatalog {
                                 JSONObject()
                                     .put("type", "string")
                                     .put("description", "type 要输入的文本。只会发送给工具，不会显示在运行摘要中。")
+                            )
+                            .put(
+                                "script",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("description", "evaluate 在页面上下文中执行的 JavaScript 代码。")
                             )
                             .put(
                                 "submit",
@@ -96,7 +104,7 @@ internal object AgentBrowserToolCatalog {
                                 "max_chars",
                                 JSONObject()
                                     .put("type", "integer")
-                                    .put("description", "get_readable 或 get_text 最多返回的文本字符数。")
+                                    .put("description", "get_readable、get_text 或 get_html 最多返回的字符数。")
                             )
                             .put(
                                 "include_screenshot",

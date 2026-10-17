@@ -2,6 +2,7 @@ package io.github.mangi.eta.data.repository
 
 import android.content.Context
 import android.util.AtomicFile
+import io.github.mangi.eta.agent.model.AgentFunctionModelResolver
 import io.github.mangi.eta.data.datastore.SettingsDataStore
 import java.io.File
 import java.io.IOException
@@ -62,6 +63,12 @@ internal class AgentMemoryStore(
     private val memoryDir = File(rootDir, DIRECTORY_NAME)
     private val atomicFile = AtomicFile(File(memoryDir, FILE_NAME))
     private val lock = Any()
+
+    /** 语义检索的向量索引；未配置 EMBEDDING 槽位时 embed 返回 null，此时只走关键词检索。 */
+    private val embeddingIndex = AgentMemoryEmbeddingIndex(File(memoryDir, EMBEDDING_FILE_NAME)) { texts ->
+        val config = AgentFunctionModelResolver.resolveSlot(AgentFunctionModelResolver.PURPOSE_EMBEDDING)
+        if (config == null) null else AgentMemoryEmbeddingClient.embed(config, texts)
+    }
 
     fun snapshot(): AgentMemorySnapshot = synchronized(lock) {
         snapshotLocked()
@@ -234,40 +241,88 @@ internal class AgentMemoryStore(
         maxChars: Int,
     ): AgentMemoryReadResult {
         val lines = snapshot.content.memoryLines()
-        val matched = lines.indices.filter { index ->
-            lines[index].contains(query, ignoreCase = true)
+        val matched = AgentMemorySearch.matchedIndices(lines, query)
+        val semantic = semanticSections(lines, query)
+        if (matched.isEmpty() && semantic.isEmpty()) {
+            return AgentMemoryReadResult(snapshot, "", null, null, false, 0)
         }
-        val included = linkedSetOf<Int>()
-        matched.forEach { index ->
-            for (candidate in (index - SEARCH_CONTEXT_LINES)..(index + SEARCH_CONTEXT_LINES)) {
-                if (candidate in lines.indices) included += candidate
-            }
+        val sequence = AgentMemorySearch.hybridIndices(lines, query, semantic)
+        if (sequence.isEmpty()) {
+            return AgentMemoryReadResult(snapshot, "", null, null, false, 0)
         }
+
+        // 按「小节得分」顺序渲染命中行（含上下文）；行号仍是原始文件行号，
+        // 便于 memory_write 用修订号做局部更新。
         val output = StringBuilder()
-        var lastIncluded: Int? = null
+        var firstRendered: Int? = null
+        var lastRendered: Int? = null
         var renderedCount = 0
-        for (index in included) {
+        for (index in sequence) {
             val rendered = "${index + 1}: ${lines[index]}"
             val gap = when {
                 output.isEmpty() -> ""
-                lastIncluded != null && index > lastIncluded + 1 -> "\n…\n"
+                lastRendered != null && index != lastRendered!! + 1 -> "\n…\n"
                 else -> "\n"
             }
             if (output.isNotEmpty() && output.length + gap.length + rendered.length > maxChars) break
-            output.append(gap).append(rendered.take(maxChars - output.length - gap.length))
-            lastIncluded = index
+            output.append(gap)
+                .append(rendered.take((maxChars - output.length - gap.length).coerceAtLeast(0)))
+            if (firstRendered == null) firstRendered = index
+            lastRendered = index
             renderedCount++
             if (output.length >= maxChars) break
         }
         return AgentMemoryReadResult(
             snapshot = snapshot,
             content = output.toString(),
-            startLine = included.firstOrNull()?.plus(1),
-            endLine = lastIncluded?.plus(1),
-            hasMore = renderedCount < included.size,
+            startLine = firstRendered?.plus(1),
+            endLine = lastRendered?.plus(1),
+            hasMore = renderedCount < sequence.size,
             matchedLines = matched.size,
         )
     }
+
+    /**
+     * 语义召回：需要配置 EMBEDDING 功能槽位；未配置、请求失败或超时都返回空，只降级为关键词检索。
+     * 未建立索引的小节按预算逐次补算，所以首次调用只多一次请求，后续逐步覆盖。
+     */
+    private fun semanticSections(lines: List<String>, query: String): List<AgentMemorySearch.SemanticHit> {
+        if (query.isBlank()) return emptyList()
+        val sections = AgentMemorySearch.sections(lines)
+        if (sections.isEmpty()) return emptyList()
+        val config = AgentFunctionModelResolver.resolveSlot(AgentFunctionModelResolver.PURPOSE_EMBEDDING)
+            ?: return emptyList()
+        val texts = LinkedHashMap<String, String>()
+        texts["q"] = query
+        sections.forEachIndexed { index, section -> texts["s$index"] = sectionText(lines, section) }
+        val vectors = embeddingIndex.vectors(
+            modelKey = AgentMemoryEmbeddingClient.modelKey(config),
+            texts = texts,
+            budget = SEMANTIC_INDEX_BUDGET,
+        )
+        val queryVector = vectors["q"]
+        if (queryVector == null) {
+            android.util.Log.d(
+                EMBEDDING_LOG_TAG,
+                "semantic unavailable: query embedding missing (model=${config.model} vectors=${vectors.size})",
+            )
+            return emptyList()
+        }
+        val candidates = sections.mapIndexedNotNull { index, section ->
+            vectors["s$index"]?.let { section to it }
+        }
+        if (candidates.isEmpty()) return emptyList()
+        val hits = AgentMemorySearch.semanticSections(candidates, queryVector)
+        android.util.Log.d(
+            EMBEDDING_LOG_TAG,
+            "semantic model=${config.model} sections=${sections.size} vectors=${vectors.size} " +
+                "candidates=${candidates.size} hits=${hits.size}",
+        )
+        return hits
+    }
+
+    private fun sectionText(lines: List<String>, section: AgentMemorySearch.Section): String =
+        lines.subList(section.start, section.end + 1).joinToString("\n").take(MAX_SECTION_EMBED_CHARS)
 
     private fun snapshotOf(
         content: String,
@@ -297,6 +352,12 @@ internal class AgentMemoryStore(
         const val MAX_WRITE_CONTENT_CHARS = 3_500
         private const val DIRECTORY_NAME = "memory"
         private const val FILE_NAME = "MEMORY.md"
+        private const val EMBEDDING_FILE_NAME = "embeddings.json"
+        private const val EMBEDDING_LOG_TAG = "EtaMemEmbed"
+
+        /** 单次记忆检索最多新建多少条向量（含查询自身），用于把首次延迟压在一次请求内。 */
+        private const val SEMANTIC_INDEX_BUDGET = 12
+        private const val MAX_SECTION_EMBED_CHARS = 800
         private const val DEFAULT_START_LINE = 1
         private const val SEARCH_CONTEXT_LINES = 1
     }

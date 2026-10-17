@@ -35,14 +35,23 @@ internal object RootAccess {
     val isGranted: Boolean get() = mutableState.value.isGranted
     private var preferences: SharedPreferences? = null
     private var probeJob: Job? = null
+    private var appContext: Context? = null
 
     fun initialize(context: Context) {
         synchronized(this) {
             if (preferences != null) return
+            appContext = context.applicationContext
             preferences = context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
         }
         refresh(context)
     }
+
+    /**
+     * 用户/工具主动查询时的重新探测（explicit 语义，不受「自动只试一次」限制）。
+     * 首次探测时若 su 恰好不可用（例如授权被外部改动），状态会长期停在未授权；
+     * 这里给出一个可被显式查询触发的重探入口。
+     */
+    fun recheck(): Job? = appContext?.let { request(it) }
 
     /** 首次发现 su 时请求一次；拒绝后只有显式 request 才会再次申请。 */
     fun refresh(context: Context): Job = startProbe(context, explicit = false)
@@ -108,10 +117,7 @@ internal object RootAccess {
         }.also { probeJob = it }
     }
 
-    private fun suExists(): Boolean = System.getenv("PATH").orEmpty()
-        .split(File.pathSeparatorChar)
-        .filter(String::isNotBlank)
-        .any { path -> File(path, "su").let { it.isFile && it.canExecute() } }
+    private fun suExists(): Boolean = RootSuResolver.resolve() != null
 }
 
 internal fun shouldRequestRoot(explicit: Boolean, attempted: Boolean, wasGranted: Boolean): Boolean =

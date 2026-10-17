@@ -42,6 +42,7 @@ internal object Prefs {
         const val AGENT_DEVICE_DIRECT_TOOLS = "agent_device_direct_tools"
         const val AGENT_DEVICE_SENSITIVE_READ_TOOLS = "agent_device_sensitive_read_tools"
         const val AGENT_DEVICE_SENSITIVE_ACTION_TOOLS = "agent_device_sensitive_action_tools"
+        const val AGENT_SHADOW_TOOLS = "agent_shadow_tools"
         const val AGENT_THINKING_ENABLED = "agent_thinking_enabled"
         const val AGENT_RUNTIME_CONFIG_JSON = "agent_runtime_config_json"
         const val ETA_HOTWORD_ENABLED = "eta_hotword_enabled"
@@ -50,6 +51,35 @@ internal object Prefs {
         const val ETA_TTS_ENABLED = "eta_tts_enabled"
         const val ETA_REMINDER_KAIGONG = "eta_reminder_kaigong"
         const val ETA_REMINDER_WINDOW = "eta_reminder_window"
+        // R3 护栏：每日 Token 限额（0=不限）与主备模型（故障自动切换）
+        const val AGENT_DAILY_TOKEN_LIMIT = "agent_daily_token_limit"
+        const val AGENT_FALLBACK_PROVIDER_ID = "agent_fallback_provider_id"
+        const val AGENT_FALLBACK_MODEL_ID = "agent_fallback_model_id"
+
+        /** 每 Provider 每分钟请求上限（0=不限）。 */
+        const val AGENT_RATE_LIMIT_PER_MINUTE = "agent_rate_limit_per_minute"
+
+        /** 工具精简模式（CLI）：只向模型下发核心工具 + search_tools，其余按需检索。 */
+        const val AGENT_TOOL_CLI_MODE = "agent_tool_cli_mode"
+
+        /** 按功能分配模型：{"SUMMARY":"providerId/modelId", ...}。 */
+        const val AGENT_FUNCTION_MODEL_MAP = "agent_function_model_map"
+
+        // 外部聊天通道（HTTP + A2A，仅回环）
+        const val EXTERNAL_CHAT_ENABLED = "external_chat_enabled"
+        const val EXTERNAL_CHAT_PORT = "external_chat_port"
+        const val EXTERNAL_CHAT_TOKEN = "external_chat_token"
+
+        // MCP 服务器：把 Eta 工具集通过 MCP Streamable HTTP 对外开放（默认关闭）
+        const val MCP_SERVER_ENABLED = "mcp_server_enabled"
+        /** 显式要求把 MCP 工具直接塞进本轮 prompt（默认关闭 = 延迟加载，靠 search_tools 检索）。 */
+        const val AGENT_MCP_TOOLS_EAGER = "agent_mcp_tools_eager"
+        const val MCP_SERVER_PORT = "mcp_server_port"
+        const val MCP_SERVER_TOKEN = "mcp_server_token"
+        const val MCP_SERVER_ALLOW_SENSITIVE = "mcp_server_allow_sensitive"
+        const val MCP_CONFIRM_TRADES = "mcp_confirm_trades"
+        const val MCP_SERVER_PORT_DEFAULT = 18181
+        const val MCP_SERVER_TOKEN_DEFAULT = ""
 
         /** 全部布尔开关及其默认值。 */
         val BOOLEAN_DEFAULTS: Map<String, Boolean> = mapOf(
@@ -67,12 +97,19 @@ internal object Prefs {
             AGENT_DEVICE_DIRECT_TOOLS to true,
             AGENT_DEVICE_SENSITIVE_READ_TOOLS to true,
             AGENT_DEVICE_SENSITIVE_ACTION_TOOLS to true,
+            AGENT_SHADOW_TOOLS to false,
             AGENT_THINKING_ENABLED to true,
             ETA_HOTWORD_ENABLED to false,
             ETA_VOICE_CONTINUOUS to false,
             ETA_TTS_ENABLED to false,
             ETA_REMINDER_KAIGONG to false,
             ETA_REMINDER_WINDOW to false,
+            MCP_SERVER_ENABLED to false,
+            MCP_SERVER_ALLOW_SENSITIVE to false,
+            MCP_CONFIRM_TRADES to true,
+            AGENT_TOOL_CLI_MODE to false,
+            AGENT_MCP_TOOLS_EAGER to false,
+            EXTERNAL_CHAT_ENABLED to false,
         )
 
         /** 由 Eta Runtime 最终裁决、不要求 Xposed 框架在线的开关。 */
@@ -82,12 +119,19 @@ internal object Prefs {
             AGENT_DEVICE_DIRECT_TOOLS,
             AGENT_DEVICE_SENSITIVE_READ_TOOLS,
             AGENT_DEVICE_SENSITIVE_ACTION_TOOLS,
+            AGENT_SHADOW_TOOLS,
             AGENT_THINKING_ENABLED,
             ETA_HOTWORD_ENABLED,
             ETA_VOICE_CONTINUOUS,
             ETA_TTS_ENABLED,
             ETA_REMINDER_KAIGONG,
             ETA_REMINDER_WINDOW,
+            MCP_SERVER_ENABLED,
+            MCP_SERVER_ALLOW_SENSITIVE,
+            MCP_CONFIRM_TRADES,
+            EXTERNAL_CHAT_ENABLED,
+            AGENT_TOOL_CLI_MODE,
+            AGENT_MCP_TOOLS_EAGER,
         )
     }
 
@@ -107,9 +151,32 @@ internal object Prefs {
                         LOCAL_AGENT_GROUP,
                         Context.MODE_PRIVATE,
                     )
+                    // 清理旧版本误写成 Boolean 的 MCP key（曾导致服务启动时 ClassCastException 闪退）
+                    purgeLegacyMcpKeys()
                 }
             }
         }
+    }
+
+    /**
+     * 删除旧版本误写到 SharedPreferences 的坏类型 MCP key（历史原因：MCP_SERVER_PORT /
+     * MCP_SERVER_TOKEN 曾被当成 Boolean 写入，读取时抛 ClassCastException）。幂等。
+     */
+    private fun purgeLegacyMcpKeys() {
+        val local = localAgent ?: return
+        val polluted = setOf(Keys.MCP_SERVER_PORT, Keys.MCP_SERVER_TOKEN)
+        val editor = local.edit()
+        var changed = false
+        for (key in polluted) {
+            if (local.contains(key)) {
+                val currentType = runCatching { local.all[key]?.javaClass?.simpleName }.getOrNull()
+                if (currentType != null && currentType != "String") {
+                    editor.remove(key)
+                    changed = true
+                }
+            }
+        }
+        if (changed) editor.apply()
     }
 
     /** Hook 进程调用：缓存框架提供的只读 SharedPreferences。 */
@@ -136,6 +203,40 @@ internal object Prefs {
 
     fun getString(key: String): String {
         return remote?.getString(key, "") ?: ""
+    }
+
+    /** 读取 Runtime 本地整数配置；缺省或非法时返回 [fallback]。 */
+    fun getLocalAgentInt(key: String, fallback: Int): Int {
+        val raw = localAgent?.getStringCompat(key, null) ?: remote?.getStringCompat(key, null)
+        return raw?.trim()?.toIntOrNull()?.takeIf { it >= 0 } ?: fallback
+    }
+
+    /** 读取 Runtime 本地长整数配置；缺省或非法时返回 [fallback]。 */
+    fun getLocalAgentLong(key: String, fallback: Long): Long {
+        val raw = localAgent?.getStringCompat(key, null) ?: remote?.getStringCompat(key, null)
+        return raw?.trim()?.toLongOrNull()?.takeIf { it >= 0L } ?: fallback
+    }
+
+    /** 读取 Runtime 本地字符串配置；本地缺失时回退远端，再缺省时返回 [fallback]。 */
+    fun getLocalString(key: String, fallback: String = ""): String =
+        localAgent?.getStringCompat(key, null)
+            ?: remote?.getStringCompat(key, null)
+            ?: fallback
+
+    /** 通用写本地 Agent 配置（设置页与 MCP/Mem0 配置 UI 走这条路径）。 */
+    fun putLocal(key: String, value: Boolean) {
+        val local = localAgent ?: return
+        runCatching { local.edit().putBoolean(key, value).apply() }
+    }
+
+    fun putLocal(key: String, value: Int) {
+        val local = localAgent ?: return
+        runCatching { local.edit().putInt(key, value).apply() }
+    }
+
+    fun putLocal(key: String, value: String) {
+        val local = localAgent ?: return
+        runCatching { local.edit().putString(key, value).apply() }
     }
 
     fun powerAssistantTarget(): PowerAssistantTarget = powerAssistantTarget(remote)
@@ -191,4 +292,15 @@ internal object Prefs {
         if (updateLocal) localEditor.commit()
         if (updateRemote) runCatching { remoteEditor.commit() }
     }
+}
+
+/**
+ * 容错读取字符串：旧版本可能把 key 写成非 String 类型，直接 getString 会抛
+ * ClassCastException；这里捕获异常、后台删除污染 key 并返回缺省值。
+ */
+private fun SharedPreferences.getStringCompat(key: String, defaultValue: String?): String? = try {
+    getString(key, defaultValue)
+} catch (e: ClassCastException) {
+    runCatching { edit().remove(key).apply() }
+    defaultValue
 }

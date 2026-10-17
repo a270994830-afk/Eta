@@ -58,7 +58,7 @@ internal data class AgentToolCapabilities(
             setOf("oppo", "oneplus", "realme")
 
         fun capture(context: Context): AgentToolCapabilities = AgentToolCapabilities(
-            rootAvailable = RootAccess.isGranted,
+            rootAvailable = io.github.mangi.eta.agent.device.PrivilegedShell.available(),
             lsposedAvailable = EtaApp.serviceInstance != null,
             accessibilityAvailable = AgentAccessibilityService.isAvailable(),
             accessibilityRecoveryAvailable = EtaApp.serviceInstance != null &&

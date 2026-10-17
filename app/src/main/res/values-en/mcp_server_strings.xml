@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mcp_server_channel">MCP service</string>
+    <string name="mcp_server_notification_title">Eta MCP Server</string>
+    <string name="mcp_server_notification_text">Listening on 127.0.0.1:%1$d  ·  %2$s</string>
+    <string name="mcp_server_stop_action">Stop</string>
+
+    <!-- Settings: local MCP Server section -->
+    <string name="mcp_server_section_title">Local MCP Server (let external clients drive Eta)</string>
+    <string name="mcp_server_section_summary">Expose Eta\'s toolset over the MCP Streamable HTTP protocol so clients such as Claude Desktop, Cursor, OpenCode or Continue can call Eta to control this phone.</string>
+    <string name="mcp_server_enable_label">Enable local MCP Server</string>
+    <string name="mcp_server_enable_summary">Eta listens on a 127.0.0.1 port; external clients authenticate with a Bearer token and can then use the toolset.</string>
+    <string name="mcp_server_port_label">Listen port</string>
+    <string name="mcp_server_port_summary">An integer between 1024 and 65535; clients must know this port to connect.</string>
+    <string name="mcp_server_token_label">Bearer Token</string>
+    <string name="mcp_server_token_summary">Secret sent in the client\'s Authorization header; 32+ characters recommended. Leave empty to auto-generate.</string>
+    <string name="mcp_server_token_placeholder">Auto-generated (filled when you press Start)</string>
+    <string name="mcp_server_allow_sensitive_label">Expose sensitive tools</string>
+    <string name="mcp_server_allow_sensitive_summary">Off by default. When enabled, clients may call sensitive tools such as reading notifications or personal orders.</string>
+    <string name="mcp_server_start_button">Start</string>
+    <string name="mcp_server_stop_button">Stop</string>
+    <string name="mcp_server_status_label">Status</string>
+    <string name="mcp_server_status_idle">Not running</string>
+    <string name="mcp_server_status_running">Running (127.0.0.1:%1$d)</string>
+    <string name="mcp_server_status_starting">Starting…</string>
+    <string name="mcp_server_status_stopping">Stopping…</string>
+    <string name="mcp_server_token_generated">New token generated, length %1$d</string>
+    <string name="mcp_server_started">MCP Server started</string>
+    <string name="mcp_server_stopped">MCP Server stopped</string>
+    <string name="mcp_server_failed">MCP Server failed to start: %1$s</string>
+    <string name="mcp_server_token_empty">Configure a Bearer token first (press Start to auto-generate)</string>
+    <string name="mcp_server_port_invalid">Port must be between 1024 and 65535</string>
+</resources>

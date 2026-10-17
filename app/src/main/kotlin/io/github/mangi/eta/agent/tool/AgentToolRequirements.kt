@@ -44,6 +44,7 @@ internal object AgentToolRequirements {
             "character_memory_get", "character_memory_write",
             "skills_list", "skills_read", "skills_read_resource", "skills_list_curated",
             "skills_inspect_github", "skills_install_from_github",
+            "double_tap", "note_add", "note_list", "note_clear",
         )
         register(
             RootRequirement.PARTIAL,
@@ -62,8 +63,89 @@ internal object AgentToolRequirements {
             "search_recording_summaries", "search_coloros_memories", "search_saved_places",
             "search_qq_chat_images", "search_wechat_chat_images",
         )
+        // 影子屏（无头虚拟屏）工具链：需要 root/carrier。
+        // 未登记会让 capabilities.project() 里 rootRequirement() 的 requireNotNull 抛
+        // "Missing tool requirements"，整轮 run 在工具目录构建阶段就崩。
+        register(
+            RootRequirement.REQUIRED,
+            "shadow_open", "shadow_close", "shadow_status", "shadow_launch",
+            "shadow_tap", "shadow_swipe", "shadow_input_text", "shadow_press_key",
+            "shadow_screenshot", "shadow_ui_tree",
+        )
+        // 文件工具族（terminal 开关控制下发）
+        register(
+            RootRequirement.NONE,
+            "file_exists", "file_copy", "file_find", "file_grep", "file_edit",
+            "file_mkdir", "file_zip", "file_unzip", "file_download",
+        )
+        register(RootRequirement.PARTIAL, "file_move", "file_delete")
+        // 集成/系统工具族
+        register(
+            RootRequirement.NONE,
+            "http_request", "calculate", "toast", "send_notification",
+            "list_installed_apps", "execute_intent", "send_broadcast", "update_check",
+        )
+        register(RootRequirement.PARTIAL, "install_app")
+        register(RootRequirement.REQUIRED, "uninstall_app")
+        // 管理/会话/媒体工具族
+        // 管理/会话/媒体/蓝牙工具族
+        // Shizuku（免 Root 的 ADB 级特权通道）
+        register(
+            RootRequirement.NONE,
+            "shizuku_status", "shizuku_request_permission", "shizuku_shell", "shizuku_list_apps",
+            "privileged_status",
+        )
+        // 更新与录屏
+        register(RootRequirement.NONE, "update_download", "update_verify")
+        register(RootRequirement.PARTIAL, "update_install")
+        register(
+            RootRequirement.NONE,
+            "screen_record_start", "screen_record_stop", "screen_record_status", "screen_record_list",
+        )
+        // 桌面宠物（虚拟形象）：纯表现层，无特权/无障碍依赖
+        register(
+            RootRequirement.NONE,
+            "pet_status", "pet_show", "pet_hide", "pet_state", "pet_say",
+        )
+        // 应用 UI 文档（读元素档案，供一次生成多步 flow；未登记会被目录过滤掉）
+        register(RootRequirement.NONE, "app_ui_doc")
+        // 插件包管理（pack_* 动态工具走 dynamicRequirement 兜底）
+        register(
+            RootRequirement.NONE,
+            "tool_pack_list", "tool_pack_install", "tool_pack_remove",
+            "tool_pack_reload", "tool_pack_show",
+        )
+        // 工作流编排
+        register(
+            RootRequirement.NONE,
+            "workflow_create", "workflow_list", "workflow_get", "workflow_delete",
+            "workflow_run", "workflow_schedule", "workflow_unschedule",
+        )
+        // 偏好类（语音配置/角色卡/数据自检/MCP 运维/工具授权）
+        register(
+            RootRequirement.NONE,
+            "speech_config_get", "speech_config_set",
+            "character_list", "character_get", "data_health",
+            "mcp_servers_list", "mcp_server_refresh",
+            "tool_permission_approve",
+        )
+        register(
+            RootRequirement.NONE,
+            "bt_status", "bt_paired_devices", "bt_scan",
+            "bt_spp_connect", "bt_spp_send", "bt_spp_close",
+            "bt_ble_scan", "bt_ble_connect", "bt_ble_write", "bt_ble_read",
+        )
+        register(
+            RootRequirement.NONE,
+            "model_config_list", "model_config_test", "usage_stats",
+            "tool_permission_list", "tool_permission_set", "rate_limit_status",
+            "conversation_list", "conversation_read", "conversation_delete",
+            "music_status", "music_pause", "music_resume", "music_stop", "music_seek",
+            "search_tools",
+        )
         listOf(
             "observe_screen", "ocr_screen", "tap", "tap_text", "tap_area", "tap_element", "long_press",
+            "double_tap",
             "long_press_element", "swipe", "scroll", "scroll_element", "input_text",
             "replace_text", "clear_text", "paste_text", "press_key", "open_system_panel",
             "wait_for_text", "wait_for_package",
@@ -88,10 +170,24 @@ internal object AgentToolRequirements {
 
     val toolNames: Set<String> get() = definitions.keys
 
-    fun find(name: String): LocalToolRequirement? = definitions[name]
+    fun find(name: String): LocalToolRequirement? = definitions[name] ?: dynamicRequirement(name)
 
+    /**
+     * 动态工具（插件包 `pack_*`）不在静态表里，默认按「无 Root 需求」处理；
+     * 若直接返回 null，capabilities.project() 里的 requireNotNull 会抛异常、整轮工具目录作废。
+     */
+    private fun dynamicRequirement(name: String): LocalToolRequirement? =
+        if (name.startsWith("pack_")) LocalToolRequirement(RootRequirement.NONE) else null
+
+    /**
+     * 读取某工具需要的能力等级。
+     *
+     * **容错语义**：未登记的工具按 NONE 处理（fail-open），不再 requireNotNull 抛异常——
+     * 曾经的严格写法在 capabilities.project() 里会让**整个模型工具目录构建失败**
+     * （MCP 端被 runCatching 吞掉后静默返回 0 个工具，极难排查）。
+     */
     fun rootRequirement(name: String): RootRequirement =
-        requireNotNull(find(name)) { "Missing tool requirements: $name" }.rootRequirement
+        find(name)?.rootRequirement ?: RootRequirement.NONE
 
     fun requiresAccessibility(name: String): Boolean = find(name)?.accessibility == true
 
@@ -124,7 +220,7 @@ internal object AgentToolRequirements {
             "terminal" -> {
                 function.put("description", "在当前设备管理普通 Android Shell 或用户选择的 Linux 环境。" +
                     "以 App UID 执行，支持会话、异步任务和后台服务；Linux 内的模拟身份不提供 Android 系统特权。" +
-                    "使用 open_and_exec 执行单次命令，open/exec 复用会话，daemon_start/list/logs/stop 管理后台服务。")
+                    "使用 open_and_exec 执行单次命令，open/exec 复用会话（wait=false 启动长任务/交互式命令后用 read_session 取输出、input 写输入），daemon_start/list/logs/stop 管理后台服务。")
                 properties?.getJSONObject("identity")
                     ?.put("enum", JSONArray().put("user"))
                     ?.put("description", "宿主执行身份；当前仅支持 user，默认 user。")

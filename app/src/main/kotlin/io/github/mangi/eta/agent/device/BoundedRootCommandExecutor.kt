@@ -25,12 +25,18 @@ internal class BoundedRootCommandExecutor(
         command: String,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MS,
         maxOutputBytes: Int = DEFAULT_MAX_OUTPUT_BYTES,
+        allowLargeOutput: Boolean = false,
     ): Result {
         if (closed.get()) return Result.failed("ROOT_EXECUTOR_CLOSED")
-        if (!rootAvailable()) return Result.failed("ROOT_REQUIRED")
+        if (!rootAvailable()) {
+            return PrivilegedShell.shizukuFallback(command, timeoutMillis, maxOutputBytes)
+                ?: Result.failed("ROOT_REQUIRED")
+        }
+        // 默认 2MB 安全上限；截图等确实需要更大输出的调用可显式放开
+        val outputCap = if (allowLargeOutput) MAX_LARGE_OUTPUT_BYTES else MAX_MAX_OUTPUT_BYTES
         val envelope = RootCommandEnvelope(command)
         val process = runCatching {
-            ProcessBuilder("su", "-c", envelope.script)
+            ProcessBuilder(RootSuResolver.command(), "-c", envelope.script)
                 .redirectErrorStream(false)
                 .start()
         }.getOrElse {
@@ -44,11 +50,11 @@ internal class BoundedRootCommandExecutor(
         val ioPool = Executors.newFixedThreadPool(2)
         return try {
             val stdoutFuture = ioPool.submit<BoundedOutput> {
-                process.inputStream.use { it.readBounded(maxOutputBytes) }
+                process.inputStream.use { it.readBounded(maxOutputBytes, outputCap) }
             }
             val stderrFuture = ioPool.submit<BoundedOutput> {
                 process.errorStream.use {
-                    it.readBounded(maxOutputBytes.coerceIn(1, MAX_MAX_OUTPUT_BYTES) + envelope.markerBytes)
+                    it.readBounded(maxOutputBytes.coerceIn(1, outputCap) + envelope.markerBytes, outputCap + envelope.markerBytes)
                 }
             }
             val completed = runCatching {
@@ -105,8 +111,8 @@ internal class BoundedRootCommandExecutor(
         runCatching { process.errorStream.close() }
     }
 
-    private fun InputStream.readBounded(maxBytes: Int): BoundedOutput {
-        val limit = maxBytes.coerceIn(1, MAX_MAX_OUTPUT_BYTES)
+    private fun InputStream.readBounded(maxBytes: Int, cap: Int = MAX_MAX_OUTPUT_BYTES): BoundedOutput {
+        val limit = maxBytes.coerceIn(1, cap)
         val collected = ByteArrayOutputStream(limit.coerceAtMost(32 * 1024))
         val buffer = ByteArray(8 * 1024)
         var truncated = false
@@ -159,6 +165,9 @@ internal class BoundedRootCommandExecutor(
         const val MAX_TIMEOUT_MS = 30_000L
         const val DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024
         const val MAX_MAX_OUTPUT_BYTES = 2 * 1024 * 1024
+
+        /** 显式放开时的上限（影子屏截图需要单次读回整张 PNG 的 base64）。 */
+        const val MAX_LARGE_OUTPUT_BYTES = 24 * 1024 * 1024
         const val IO_JOIN_TIMEOUT_MS = 2_000L
     }
 }

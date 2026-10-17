@@ -156,6 +156,28 @@ internal interface ConversationDao : ChunkedTextDao {
     @Query("DELETE FROM conversation_state")
     suspend fun deleteState()
 
+    @Query("UPDATE conversations SET title = :title, updated_at = :updatedAt WHERE id = :conversationId")
+    suspend fun updateTitle(conversationId: String, title: String, updatedAt: Long)
+
+    @Query("SELECT COUNT(*) FROM conversation_messages WHERE conversation_id = :conversationId")
+    suspend fun countMessages(conversationId: String): Int
+
+    @Query("DELETE FROM conversations WHERE id = :conversationId")
+    suspend fun deleteConversation(conversationId: String)
+
+    @Query("DELETE FROM conversation_messages WHERE conversation_id = :conversationId")
+    suspend fun deleteConversationMessages(conversationId: String)
+
+    @Query("DELETE FROM conversation_context_checkpoints WHERE conversation_id = :conversationId")
+    suspend fun deleteConversationCheckpoints(conversationId: String)
+
+    @Transaction
+    suspend fun deleteConversationCascade(conversationId: String) {
+        deleteConversationMessages(conversationId)
+        deleteConversationCheckpoints(conversationId)
+        deleteConversation(conversationId)
+    }
+
     @Transaction
     suspend fun replaceAll(
         conversations: List<ConversationEntity>,

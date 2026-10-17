@@ -38,6 +38,16 @@ internal class AgentRunController {
     }
 
     /**
+     * 只掐断当前在途的网络/资源请求，不把本次 run 标记为已取消。
+     * 用于“某一阶段超时”这类需要给出明确失败、但不应终止整个任务的情况（如上下文压缩超时）。
+     */
+    fun abortInFlightRequests() {
+        resources.forEach { resource ->
+            runCatching { resource.cancel() }
+        }
+    }
+
+    /**
      * 将补充指令排入下一个 turn。steering 不取消当前模型请求或工具批次。
      */
     fun steer(text: String): Boolean {

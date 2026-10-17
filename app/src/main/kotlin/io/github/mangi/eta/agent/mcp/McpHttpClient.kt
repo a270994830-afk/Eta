@@ -4,6 +4,7 @@ import io.github.mangi.eta.agent.model.AgentHttpClient
 import io.github.mangi.eta.data.model.McpProtocolMode
 import io.github.mangi.eta.data.model.McpServerSetting
 import io.github.mangi.eta.data.model.McpToolDefinition
+import io.github.mangi.eta.data.model.McpTransport
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicLong
 import okhttp3.Call
@@ -20,6 +21,7 @@ import org.json.JSONObject
 internal class McpHttpClient(
     private val server: McpServerSetting,
     private val bearerToken: String?,
+    private val customHeaders: Map<String, String> = emptyMap(),
 ) : AutoCloseable {
     data class Discovery(
         val protocolVersion: String,
@@ -37,7 +39,14 @@ internal class McpHttpClient(
         val sessionId: String?,
     )
 
-    private val endpoint = validateMcpEndpoint(server.url)
+    private val stdioSession: McpStdioSession? =
+        if (server.url.trim().startsWith(McpTransport.STDIO_PREFIX)) {
+            McpStdioSession.of(server.url)
+        } else {
+            null
+        }
+    private val endpoint: okhttp3.HttpUrl? =
+        if (stdioSession == null) validateMcpEndpoint(server.url) else null
     private val requestIds = AtomicLong(1)
     private val toolHeadersByName = mutableMapOf<String, McpToolHeaders>()
     private val lifecycleLock = Any()
@@ -49,6 +58,7 @@ internal class McpHttpClient(
     private var legacySessionId: String? = null
 
     fun discoverTools(): Discovery {
+        stdioSession?.let { return discoverStdio(it) }
         val requestedMode = server.protocolMode
         if (requestedMode == McpProtocolMode.LEGACY) return discoverLegacy()
         if (requestedMode == McpProtocolMode.LATEST) return discoverLatest()
@@ -60,6 +70,7 @@ internal class McpHttpClient(
     }
 
     fun callTool(tool: McpToolDefinition, arguments: JSONObject): JSONObject {
+        stdioSession?.let { return callStdioTool(it, tool, arguments) }
         val version = negotiatedVersion ?: when (
             server.lastProtocolVersion ?: server.protocolMode
         ) {
@@ -95,6 +106,8 @@ internal class McpHttpClient(
     }
 
     override fun close() {
+        // stdio 会话按 url 单例缓存、进程常驻以复用，这里只释放引用，不做关闭。
+        if (stdioSession != null) return
         val call: Call?
         val sessionId: String?
         val protocolVersion: String?
@@ -112,6 +125,38 @@ internal class McpHttpClient(
             releaseLegacySession(sessionId, requireNotNull(protocolVersion))
         }
     }
+
+    private fun discoverStdio(session: McpStdioSession): Discovery {
+        val tools = mutableListOf<McpToolDefinition>()
+        var cursor: String? = null
+        var pages = 0
+        while (pages < MAX_LIST_PAGES) {
+            pages += 1
+            val params = JSONObject()
+            cursor?.let { params.put("cursor", it) }
+            val result = session.request("tools/list", params)
+            val page = result.optJSONArray("tools") ?: JSONArray()
+            for (index in 0 until page.length()) {
+                if (tools.size >= MAX_DISCOVERED_TOOLS) break
+                page.optJSONObject(index)?.let { tools += parseTool(it) }
+            }
+            cursor = result.optString("nextCursor").takeIf { it.isNotBlank() }
+            if (cursor == null || tools.size >= MAX_DISCOVERED_TOOLS) break
+        }
+        return Discovery(session.initialize(), tools, cacheTtlMs = null)
+    }
+
+    private fun callStdioTool(
+        session: McpStdioSession,
+        tool: McpToolDefinition,
+        arguments: JSONObject,
+    ): JSONObject = session.request(
+        method = "tools/call",
+        params = JSONObject()
+            .put("name", tool.name)
+            .put("arguments", arguments),
+        timeoutMs = McpStdioSession.CALL_TIMEOUT_MS,
+    )
 
     private fun discoverLatest(): Discovery {
         negotiatedVersion = McpProtocolMode.LATEST
@@ -288,7 +333,7 @@ internal class McpHttpClient(
             .put("method", method)
             .put("params", decoratedParams)
         val httpRequest = Request.Builder()
-            .url(endpoint)
+            .url(requireNotNull(endpoint))
             .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
             .header("Accept", "application/json, text/event-stream")
             .header(HEADER_PROTOCOL_VERSION, protocolVersion)
@@ -309,7 +354,7 @@ internal class McpHttpClient(
                     header(headerName, headerValue)
                 }
             }
-            .applyAuthorization()
+            .applyCredentials()
             .build()
         return execute(httpRequest, expectsBody = true, expectedId = id)
     }
@@ -324,13 +369,13 @@ internal class McpHttpClient(
             .put("method", method)
             .put("params", JSONObject())
         val httpRequest = Request.Builder()
-            .url(endpoint)
+            .url(requireNotNull(endpoint))
             .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
             .header("Accept", "application/json, text/event-stream")
             .header(HEADER_PROTOCOL_VERSION, protocolVersion)
             .header(HEADER_METHOD, method)
             .apply { sessionId?.let { header(HEADER_SESSION_ID, it) } }
-            .applyAuthorization()
+            .applyCredentials()
             .build()
         execute(httpRequest, expectsBody = false, expectedId = null)
     }
@@ -383,11 +428,11 @@ internal class McpHttpClient(
 
     private fun releaseLegacySession(sessionId: String, protocolVersion: String) {
         val request = Request.Builder()
-            .url(endpoint)
+            .url(requireNotNull(endpoint))
             .delete()
             .header(HEADER_PROTOCOL_VERSION, protocolVersion)
             .header(HEADER_SESSION_ID, sessionId)
-            .applyAuthorization()
+            .applyCredentials()
             .build()
         AgentHttpClient.client.newCall(request).enqueue(
             object : Callback {
@@ -400,7 +445,18 @@ internal class McpHttpClient(
         )
     }
 
-    private fun Request.Builder.applyAuthorization(): Request.Builder = apply {
+    private fun Request.Builder.applyCredentials(): Request.Builder = apply {
+        val reservedNames = setOf(
+            "host", "content-length", "transfer-encoding", "content-type", "accept", "connection",
+        )
+        customHeaders.forEach { (name, value) ->
+            val normalized = name.trim()
+            val reserved = normalized.equals("Authorization", ignoreCase = true) ||
+                normalized.lowercase() in reservedNames
+            if (normalized.isNotEmpty() && !reserved) {
+                runCatching { header(normalized, value) }
+            }
+        }
         bearerToken?.trim()?.takeIf { it.isNotBlank() }?.let { token ->
             header("Authorization", "Bearer $token")
         }

@@ -73,7 +73,9 @@ import io.github.mangi.eta.ui.screens.characters.CharacterDetailScreen
 import io.github.mangi.eta.ui.screens.characters.CharacterEditorScreen
 import io.github.mangi.eta.ui.screens.characters.CharacterPersonaScreen
 import io.github.mangi.eta.ui.screens.characters.CharacterMemoryScreen
+import io.github.mangi.eta.ui.screens.devtools.DevToolsScreen
 import io.github.mangi.eta.ui.screens.enhance.SystemEnhanceScreen
+import io.github.mangi.eta.ui.screens.ext.AgentExtSettingsScreen
 import io.github.mangi.eta.ui.screens.home.AgentHomeScreen
 import io.github.mangi.eta.ui.screens.mcp.McpServerDetailScreen
 import io.github.mangi.eta.ui.screens.mcp.McpServersScreen
@@ -608,6 +610,9 @@ fun AgentAppRoot(
                     },
                 )
             }
+            entry<AppRoute.DevTools>(swipeDismiss = swipeDismiss) {
+                DevToolsScreen(onBack = ::popRoute)
+            }
             entry<AppRoute.Workspace>(swipeDismiss = swipeDismiss) {
                 WorkspaceScreen(onBack = ::popRoute)
             }
@@ -617,6 +622,9 @@ fun AgentAppRoot(
                     onNavigate = { route -> pushRoute(route) },
                     onBack = ::popRoute
                 )
+            }
+            entry<AppRoute.AgentExtSettings>(swipeDismiss = swipeDismiss) {
+                AgentExtSettingsScreen(onBack = ::popRoute)
             }
             entry<AppRoute.SpeechSettings>(swipeDismiss = swipeDismiss) {
                 SpeechSettingsScreen(

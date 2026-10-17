@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.AccessibilityNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AccountTree
+import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Delete
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.TheaterComedy
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.runtime.Composable
@@ -424,6 +426,19 @@ private fun SettingsPageContent(
                         },
                         onClick = { onNavigate(AppRoute.Characters) },
                     )
+
+                    EtaPreferenceDivider()
+                    EtaArrowPreference(
+                        title = "扩展设置",
+                        summary = "特权通道 / 录屏 / 更新 / 外部通道 / 工作流 / 插件包 / 用量 / 工具权限 / 限流 / 多 Key / 功能模型槽位",
+                        startAction = {
+                            EtaPreferenceIcon(
+                                icon = Icons.Rounded.Tune,
+                                tint = EtaPreferenceColors.Blue,
+                            )
+                        },
+                        onClick = { onNavigate(AppRoute.AgentExtSettings) },
+                    )
                 }
             }
 
@@ -455,6 +470,16 @@ private fun SettingsPageContent(
                         key = Prefs.Keys.AGENT_DEVICE_DIRECT_TOOLS,
                         icon = Icons.Rounded.Smartphone,
                         iconTint = EtaPreferenceColors.Green,
+                    )
+
+                    EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.ui_enable_shadow_display_tools_7c41af),
+                        key = Prefs.Keys.AGENT_SHADOW_TOOLS,
+                        icon = Icons.Rounded.Layers,
+                        iconTint = EtaPreferenceColors.Blue,
                     )
 
                     EtaPreferenceDivider()
@@ -507,6 +532,14 @@ private fun SettingsPageContent(
                         title = stringResource(R.string.capability_enhancements),
                         startAction = { EtaPreferenceIcon(Icons.Rounded.Security, tint = EtaPreferenceColors.Blue) },
                         onClick = { onNavigate(AppRoute.SystemEnhance) },
+                    )
+
+                    EtaPreferenceDivider()
+                    EtaArrowPreference(
+                        title = "开发工具箱",
+                        summary = "Logcat、数据库与性能概览",
+                        startAction = { EtaPreferenceIcon(Icons.Rounded.Build, tint = EtaPreferenceColors.Orange) },
+                        onClick = { onNavigate(AppRoute.DevTools) },
                     )
                 }
             }

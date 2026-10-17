@@ -17,6 +17,7 @@ internal object AgentRuntimePolicy {
         val deviceDirectTools: Boolean = false,
         val deviceSensitiveReadTools: Boolean = false,
         val deviceSensitiveActionTools: Boolean = false,
+        val shadowTools: Boolean = false,
         val thinking: Boolean,
     )
 
@@ -29,6 +30,7 @@ internal object AgentRuntimePolicy {
                 preferences.allowed(Prefs.Keys.AGENT_DEVICE_SENSITIVE_READ_TOOLS),
             deviceSensitiveActionTools =
                 preferences.allowed(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
+            shadowTools = preferences.allowed(Prefs.Keys.AGENT_SHADOW_TOOLS),
             thinking = preferences.allowed(Prefs.Keys.AGENT_THINKING_ENABLED),
         )
 
@@ -47,6 +49,7 @@ internal object AgentRuntimePolicy {
                 config.deviceSensitiveReadTools && permissions.deviceSensitiveReadTools,
             deviceSensitiveActionTools =
                 config.deviceSensitiveActionTools && permissions.deviceSensitiveActionTools,
+            shadowTools = config.shadowTools && permissions.shadowTools,
             thinkingEnabled = thinkingEnabled,
             reasoningEffort = effectiveEffort,
         )

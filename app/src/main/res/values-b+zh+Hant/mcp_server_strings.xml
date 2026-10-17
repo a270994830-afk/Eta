@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mcp_server_channel">MCP 服務</string>
+    <string name="mcp_server_notification_title">Eta MCP Server</string>
+    <string name="mcp_server_notification_text">監聽 127.0.0.1:%1$d  ·  %2$s</string>
+    <string name="mcp_server_stop_action">停止</string>
+
+    <!-- 設定頁「本機 MCP Server」區塊 -->
+    <string name="mcp_server_section_title">本機 MCP Server（讓外部客戶端呼叫 Eta）</string>
+    <string name="mcp_server_section_summary">把 Eta 的工具集透過 MCP Streamable HTTP 協定對外開放，讓 Claude Desktop / Cursor / OpenCode / Continue 等客戶端可以直接呼叫 Eta 控制手機。</string>
+    <string name="mcp_server_enable_label">啟用本機 MCP Server</string>
+    <string name="mcp_server_enable_summary">開啟後 Eta 會監聽 127.0.0.1 上的連接埠，外部客戶端通過 Bearer Token 驗證後即可存取工具集。</string>
+    <string name="mcp_server_port_label">監聽連接埠</string>
+    <string name="mcp_server_port_summary">1024-65535 之間的整數；客戶端需知道該連接埠才能連入。</string>
+    <string name="mcp_server_token_label">Bearer Token</string>
+    <string name="mcp_server_token_summary">客戶端 Authorization 標頭要帶的金鑰，建議 ≥ 32 字元。留空會自動產生。</string>
+    <string name="mcp_server_token_placeholder">自動產生（點選「啟動」時填入）</string>
+    <string name="mcp_server_allow_sensitive_label">曝露敏感工具</string>
+    <string name="mcp_server_allow_sensitive_summary">預設關閉。開啟後客戶端可以呼叫讀取通知 / 讀取訂單等敏感工具。</string>
+    <string name="mcp_server_start_button">啟動</string>
+    <string name="mcp_server_stop_button">停止</string>
+    <string name="mcp_server_status_label">目前狀態</string>
+    <string name="mcp_server_status_idle">未執行</string>
+    <string name="mcp_server_status_running">執行中（127.0.0.1:%1$d）</string>
+    <string name="mcp_server_status_starting">啟動中…</string>
+    <string name="mcp_server_status_stopping">停止中…</string>
+    <string name="mcp_server_token_generated">已產生新 Token，長度 %1$d</string>
+    <string name="mcp_server_started">MCP Server 已啟動</string>
+    <string name="mcp_server_stopped">MCP Server 已停止</string>
+    <string name="mcp_server_failed">MCP Server 啟動失敗：%1$s</string>
+    <string name="mcp_server_token_empty">請先設定 Bearer Token（點選「啟動」自動產生）</string>
+    <string name="mcp_server_port_invalid">連接埠必須在 1024-65535 之間</string>
+</resources>

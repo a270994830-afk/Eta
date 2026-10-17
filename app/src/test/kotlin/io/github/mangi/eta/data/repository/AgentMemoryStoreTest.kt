@@ -53,6 +53,59 @@ class AgentMemoryStoreTest {
     }
 
     @Test
+    fun searchRanksHeadingHitSectionFirstAndSkipsUnrelatedSections() {
+        val store = store()
+        store.replaceAll(
+            "# 核心记忆\n" +
+                "- 用户喜欢简洁回答\n" +
+                "## 闲聊\n" +
+                "- 昨天又聊到部署这件事\n" +
+                "## 部署\n" +
+                "- 部署脚本在 eta-src",
+        )
+
+        val result = store.read(query = "部署", maxChars = 400)
+        // 标题命中的小节（在文件更后面）整体排在前面；行号仍是原始行号
+        assertTrue(result.content.contains("5: ## 部署"))
+        assertTrue(result.content.contains("6: - 部署脚本在 eta-src"))
+        assertTrue(result.content.indexOf("5: ## 部署") < result.content.indexOf("3: ## 闲聊"))
+        assertEquals(3, result.matchedLines)
+        assertFalse(result.hasMore)
+        // 完全没命中的小节不出现
+        assertFalse(result.content.contains("用户喜欢简洁回答"))
+    }
+
+    @Test
+    fun searchMatchesAllTermsAcrossLinesAndKeepsPhraseBonus() {
+        val store = store()
+        store.replaceAll(
+            "# 记忆\n" +
+                "## A\n" +
+                "- 部署脚本\n" +
+                "## B\n" +
+                "- 部署\n" +
+                "- 脚本",
+        )
+
+        val result = store.read(query = "部署 脚本", maxChars = 400)
+        assertEquals(3, result.matchedLines)
+        // A 小节里有完整短语，得分高于 B 小节里拆开的两个词
+        assertTrue(result.content.startsWith("3: ## A"))
+    }
+
+    @Test
+    fun searchTermsDropSingleAsciiButKeepSingleCjkChar() {
+        val store = store()
+        store.replaceAll("# 记忆\n- 记一下这个点\n- xyz")
+
+        val asciiOnly = store.read(query = "x", maxChars = 200)
+        assertEquals(0, asciiOnly.matchedLines)
+
+        val cjk = store.read(query = "记", maxChars = 200)
+        assertEquals(2, cjk.matchedLines)
+    }
+
+    @Test
     fun mutationsAreAtomicRevisionCheckedAndCanDeleteOrClear() {
         val store = store()
         val initial = store.replaceAll("# 核心记忆\n旧偏好\n## 项目\n旧项目")

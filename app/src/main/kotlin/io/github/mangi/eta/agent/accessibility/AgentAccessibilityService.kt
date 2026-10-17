@@ -138,8 +138,26 @@ class AgentAccessibilityService : AccessibilityService() {
      * 避免其他运行或 wait_for_text 的临时观察改写 index 含义。
      */
     fun captureNodeSnapshot(maxNodes: Int): NodeSnapshot? = runOnMainSync {
-        val startedAt = SystemClock.elapsedRealtime()
         val root = rootInActiveWindow ?: return@runOnMainSync null
+        buildSnapshot(root, maxNodes)
+    }
+
+    /**
+     * 指定显示（如影子屏虚拟屏）上的窗口树快照。
+     *
+     * 不依赖 UiAutomation——那是全设备**独占**资源，被别的自动化占住就无法使用；
+     * 无障碍服务按 displayId 从所有显示的窗口里直接取，与其它自动化互不影响。
+     */
+    fun captureNodeSnapshotForDisplay(displayId: Int, maxNodes: Int): NodeSnapshot? = runOnMainSync {
+        val candidate = runCatching {
+            windowsOnAllDisplays?.get(displayId).orEmpty().firstOrNull { window -> window.root != null }
+        }.getOrNull() ?: return@runOnMainSync null
+        val root = candidate.root ?: return@runOnMainSync null
+        buildSnapshot(root, maxNodes)
+    }
+
+    private fun buildSnapshot(root: AccessibilityNodeInfo, maxNodes: Int): NodeSnapshot {
+        val startedAt = SystemClock.elapsedRealtime()
         val nodeLimit = maxNodes.coerceIn(1, 120)
         val indexedNodes = mutableListOf<IndexedNode>()
         val traversal = NodeTraversalState(
@@ -153,7 +171,7 @@ class AgentAccessibilityService : AccessibilityService() {
             depth = 0,
             traversal = traversal,
         )
-        NodeSnapshot(
+        return NodeSnapshot(
             id = "o${SNAPSHOT_IDS.incrementAndGet()}",
             serviceToken = serviceToken,
             packageName = root.packageName?.toString().orEmpty(),
@@ -262,6 +280,7 @@ class AgentAccessibilityService : AccessibilityService() {
         windowChangeLock.lock()
         try {
             windowChanged.signalAll()
+            signalTreeMirror()
         } finally {
             windowChangeLock.unlock()
         }
@@ -350,6 +369,74 @@ class AgentAccessibilityService : AccessibilityService() {
     private fun bumpWindowContentGeneration(windowId: Int) {
         if (windowId < 0) return
         windowContentGenerations[windowId] = windowContentGeneration(windowId) + 1L
+        signalTreeMirror()
+    }
+
+    // ── 树镜像（毫秒级识屏）────────────────────────────────
+    // 内容代每次界面变化 +1；镜像按代缓存节点列表（不变就不重新走树），
+    // 同时用同一个信号唤醒“等待界面变化”的调用者，不再轮询。
+    private val treeMirrorLock = ReentrantLock()
+    private val treeMirrorChanged = treeMirrorLock.newCondition()
+
+    @Volatile
+    private var treeMirrorGeneration: Long = 0L
+
+    private var treeMirrorNodes: List<UiNode> = emptyList()
+    private var treeMirrorCachedGeneration: Long = -1L
+
+    /** 当前内容代（每次影响节点树的窗口事件都会 +1）。 */
+    fun treeGeneration(): Long = treeMirrorGeneration
+
+    /** 界面有任何变化时唤醒所有等待者。 */
+    private fun signalTreeMirror() {
+        treeMirrorLock.lock()
+        try {
+            treeMirrorGeneration += 1L
+            treeMirrorChanged.signalAll()
+        } finally {
+            treeMirrorLock.unlock()
+        }
+    }
+
+    /**
+     * 事件驱动的“等界面变化”：界面一变立即返回，否则最多等 [timeoutMs]。
+     * 供 wait_for_text 这类等待使用，替代 350ms 轮询。
+     */
+    fun awaitTreeChange(timeoutMs: Long) {
+        if (timeoutMs <= 0) return
+        treeMirrorLock.lock()
+        try {
+            treeMirrorChanged.await(timeoutMs.coerceAtMost(AWAIT_TREE_CHANGE_MAX_MS), TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } finally {
+            treeMirrorLock.unlock()
+        }
+    }
+
+    /**
+     * 毫秒级读节点列表：内容代未变直接给缓存（不走树）；变了才重建一次。
+     */
+    fun mirrorNodes(maxNodes: Int): List<UiNode> {
+        val limit = maxNodes.coerceIn(1, 120)
+        val generation = treeMirrorGeneration
+        treeMirrorLock.lock()
+        try {
+            if (treeMirrorCachedGeneration == generation && treeMirrorNodes.isNotEmpty()) {
+                return if (treeMirrorNodes.size <= limit) treeMirrorNodes else treeMirrorNodes.take(limit)
+            }
+        } finally {
+            treeMirrorLock.unlock()
+        }
+        val fresh = captureNodeSnapshot(limit)?.nodes.orEmpty()
+        treeMirrorLock.lock()
+        try {
+            treeMirrorNodes = fresh
+            treeMirrorCachedGeneration = generation
+        } finally {
+            treeMirrorLock.unlock()
+        }
+        return fresh
     }
 
     private fun windowContentGeneration(windowId: Int): Long =
@@ -2350,6 +2437,8 @@ class AgentAccessibilityService : AccessibilityService() {
         private const val BLACK_FRAME_SAMPLE_SIDE = 64
         private const val BLACK_FRAME_LUMA = 24
         private const val WINDOW_POLL_FALLBACK_MS = 80L
+        /** 事件驱动等待的上限（每次唤醒后调用方会重新检查，超出则重新等）。 */
+        private const val AWAIT_TREE_CHANGE_MAX_MS = 500L
         private const val MAX_UI_TREE_DEPTH = 24
         private const val UI_TREE_VISIT_MULTIPLIER = 8
         private const val MIN_UI_TREE_VISITED_NODES = 128

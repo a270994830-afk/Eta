@@ -136,6 +136,22 @@ internal object AgentGestureToolCatalog {
             )
             .put(
                 AgentToolSchema.function(
+                    name = "double_tap",
+                    description = "双击坐标（快速连点两下）。用于地图缩放、图片放大、双击唤醒等场景。默认使用最近一次 observe_screen 截图里的像素坐标；坐标来自 ui_nodes 的 center 时请设置 coordinate_space=screen。",
+                    parameters = JSONObject()
+                        .put("type", "object")
+                        .put(
+                            "properties",
+                            JSONObject()
+                                .put("x", JSONObject().put("type", "integer"))
+                                .put("y", JSONObject().put("type", "integer"))
+                                .put("coordinate_space", AgentToolSchema.coordinateSpace())
+                        )
+                        .put("required", JSONArray().put("x").put("y"))
+                )
+            )
+            .put(
+                AgentToolSchema.function(
                     name = "swipe",
                     description = "从一个坐标滑动到另一个坐标。默认使用最近一次 observe_screen 截图里的像素坐标。向上滑动会让列表向下滚动。",
                     parameters = JSONObject()

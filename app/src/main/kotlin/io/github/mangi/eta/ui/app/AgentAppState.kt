@@ -18,11 +18,13 @@ import androidx.compose.runtime.snapshots.Snapshot
 import io.github.mangi.eta.EtaApp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.accessibility.AgentAccessibilityService
+import io.github.mangi.eta.agent.chat.MessageRevisionStore
 import io.github.mangi.eta.agent.device.AgentFileReferenceGateway
 import io.github.mangi.eta.agent.device.DeviceLocationProvider
 import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.media.AgentImageCodec
 import io.github.mangi.eta.agent.memory.AgentMemoryContextBuilder
+import io.github.mangi.eta.agent.model.AgentConversationCodec
 import io.github.mangi.eta.agent.model.AgentFileReference
 import io.github.mangi.eta.agent.model.AgentFileReferenceKind
 import io.github.mangi.eta.agent.model.AgentFileReferencePolicy
@@ -79,8 +81,10 @@ import io.github.mangi.eta.ui.model.SystemNoticeMessageUi
 import io.github.mangi.eta.ui.model.ThinkingMessageUi
 import io.github.mangi.eta.ui.model.TokenUsageUi
 import io.github.mangi.eta.ui.model.ToolActivityMessageUi
+import io.github.mangi.eta.ui.model.ToolActivityStatusUi
 import io.github.mangi.eta.ui.model.ToolGroupUi
 import io.github.mangi.eta.ui.model.ToolItemUi
+import io.github.mangi.eta.ui.model.ToolSummaryMessageUi
 import io.github.mangi.eta.ui.model.UserMessageUi
 import io.github.mangi.eta.ui.model.canDeleteUserSkill
 import io.github.mangi.eta.ui.model.contentMatches
@@ -126,6 +130,12 @@ internal class AgentAppState(
     private var pendingSkillZipSha256: String? = null
     private var currentReasoningCapabilities: ModelReasoningCapabilities? = null
     private var fileAttachmentOwnerVersion = 0L
+    private val pendingRevisionRecords = mutableMapOf<String, PendingRevisionRecord>()
+
+    private data class PendingRevisionRecord(
+        val conversationId: String,
+        val anchorMessageId: String,
+    )
 
     private var selectedConversationId: String? = initialConversations.selectedConversationId
     private var conversationsById: Map<String, AgentChatHomeUiState> = initialConversations.conversationsById
@@ -162,6 +172,9 @@ internal class AgentAppState(
         private set
 
     init {
+        MessageRevisionStore.load(appContext, scope)
+        conversationsById = conversationsById.mapValues { (id, state) -> decorateMessageRevisions(id, state) }
+        selectedConversationId?.let { id -> conversationsById[id]?.let { homeState = it } }
         refreshConversationSummaries()
         observeRuntimeSelection()
         scope.launch {
@@ -869,14 +882,309 @@ internal class AgentAppState(
 
     fun selectReplyCandidate(messageId: String, index: Int) {
         if (homeState.isStreaming || homeState.messageEdit != null) return
+        if (homeState.roleplay == null) {
+            selectMessageRevision(messageId, index)
+            return
+        }
         val updated = RoleplayConversationReducer.select(homeState, messageId, index) ?: return
         updateCurrentConversation(updated)
         refreshConversationSummaries()
         persistConversations()
     }
 
+    /**
+     * 普通对话的版本切换：除替换该轮助手正文外，还把「该轮之后的会话」还原为所选版本
+     * 对应的分支快照（无快照则截断到该轮），并同步改写模型上下文与完整历史。
+     */
+    private fun selectMessageRevision(messageId: String, index: Int) {
+        val conversationId = selectedConversationId ?: return
+        val state = homeState
+        val anchorMessageId = anchorMessageIdFor(state.messages, messageId) ?: return
+        val anchorIndex = state.messages.indexOfFirst { it.id == anchorMessageId }
+        if (anchorIndex < 0) return
+        val turnEnd = nextUserMessageIndex(state.messages, anchorIndex)
+        val targetIndex = (anchorIndex + 1 until turnEnd)
+            .lastOrNull { state.messages[it] is AgentMessageUi } ?: return
+
+        try {
+            val entry = MessageRevisionStore.entry(conversationId, anchorMessageId) ?: return
+            if (index !in entry.versions.indices) return
+            val text = entry.versions[index]
+            if (index != entry.selected) {
+                captureRevisionBranch(state, anchorMessageId)?.let { captured ->
+                    MessageRevisionStore.setBranch(conversationId, anchorMessageId, entry.selected, captured)
+                }
+            }
+            val branch = MessageRevisionStore.branch(conversationId, anchorMessageId, index)
+
+            val messages = state.messages.take(turnEnd).toMutableList().also { list ->
+                val target = list[targetIndex] as AgentMessageUi
+                list[targetIndex] = target.copy(content = text, isStreaming = false, renderMarkdown = true)
+            } + branch?.messages?.mapNotNull(::fromBranchMessage).orEmpty()
+
+            val historyTail = branch?.let { AgentConversationCodec.decodeTranscript(it.history) }.orEmpty()
+            val journalTail = branch?.let { AgentConversationCodec.decodeTranscript(it.journal) }.orEmpty()
+            val historySplice = spliceTurnTranscript(state.history, anchorMessageId, text, historyTail)
+            val journalPresent = state.journal.isNotEmpty()
+            val journalSplice = spliceTurnTranscript(
+                transcript = state.journal.ifEmpty { state.history },
+                anchorMessageId = anchorMessageId,
+                text = text,
+                tail = journalTail,
+            )
+
+            MessageRevisionStore.select(conversationId, anchorMessageId, index)
+            updateCurrentConversation(
+                state.copy(
+                    messages = messages,
+                    history = historySplice.transcript,
+                    journal = if (journalPresent) journalSplice.transcript else state.journal,
+                )
+            )
+            refreshConversationSummaries()
+            persistConversations()
+            showBranchRollbackNotice(
+                branch = branch,
+                laterTurnCount = state.messages.size - turnEnd,
+                historyApplied = historySplice.applied && (journalSplice.applied || !journalPresent),
+            )
+        } catch (failure: Exception) {
+            showMessageRevisionError(failure)
+        }
+    }
+
+    private fun recordRevisionForRegeneration(
+        conversationId: String,
+        boundary: AgentConversationRevisionReducer.Boundary,
+        runId: String,
+    ) {
+        try {
+            val anchorMessageId = boundary.userMessage.id
+            val previous = latestAssistantContent(homeState.messages, boundary.userMessageIndex)
+                ?.takeIf(String::isNotBlank)
+            // 重新生成会截断后续轮次，因此要在启动 run 之前把「该轮之后」的会话快照记到旧版本上。
+            val branch = captureRevisionBranch(homeState, anchorMessageId)
+            val entry = previous?.let {
+                MessageRevisionStore.recordPrevious(conversationId, anchorMessageId, it)
+            }
+            if (entry != null && branch != null) {
+                MessageRevisionStore.setBranch(
+                    conversationId = conversationId,
+                    anchorMessageId = anchorMessageId,
+                    index = entry.selected,
+                    branch = branch,
+                    preserveExistingWhenEmpty = true,
+                )
+            }
+            pendingRevisionRecords[runId] = PendingRevisionRecord(conversationId, anchorMessageId)
+        } catch (failure: Exception) {
+            showMessageRevisionError(failure)
+        }
+    }
+
+    private fun anchorMessageIdFor(messages: List<AgentChatMessageUi>, messageId: String): String? {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index < 0) return null
+        for (cursor in index downTo 0) {
+            val message = messages[cursor]
+            if (message is UserMessageUi) return message.id
+        }
+        return null
+    }
+
+    private fun nextUserMessageIndex(messages: List<AgentChatMessageUi>, fromExclusive: Int): Int {
+        for (cursor in fromExclusive + 1 until messages.size) {
+            if (messages[cursor] is UserMessageUi) return cursor
+        }
+        return messages.size
+    }
+
+    private fun latestAssistantContent(messages: List<AgentChatMessageUi>, userIndex: Int): String? {
+        val turnEnd = nextUserMessageIndex(messages, userIndex)
+        return (userIndex + 1 until turnEnd)
+            .mapNotNull { index -> messages[index] as? AgentMessageUi }
+            .lastOrNull { it.content.isNotBlank() }
+            ?.content
+    }
+
+    /** 捕获「该轮之后」的完整会话快照：UI 消息尾段 + 模型上下文尾段 + 完整历史尾段。 */
+    private fun captureRevisionBranch(
+        state: AgentChatHomeUiState,
+        anchorMessageId: String,
+    ): MessageRevisionStore.Branch? {
+        val anchorIndex = state.messages.indexOfFirst { it is UserMessageUi && it.id == anchorMessageId }
+        if (anchorIndex < 0) return null
+        val turnEnd = nextUserMessageIndex(state.messages, anchorIndex)
+        val journalSource = state.journal.ifEmpty { state.history }
+        val historyIndex = transcriptTurnAssistantIndex(state.history, anchorMessageId)
+        val journalIndex = transcriptTurnAssistantIndex(journalSource, anchorMessageId)
+        return MessageRevisionStore.Branch(
+            messages = state.messages.drop(turnEnd).mapNotNull(::toBranchMessage),
+            history = if (historyIndex >= 0) {
+                AgentConversationCodec.encodeTranscriptForStorage(state.history.drop(historyIndex + 1))
+            } else {
+                ""
+            },
+            journal = if (journalIndex >= 0) {
+                AgentConversationCodec.encodeTranscriptForStorage(journalSource.drop(journalIndex + 1))
+            } else {
+                ""
+            },
+            complete = historyIndex >= 0 && journalIndex >= 0,
+        )
+    }
+
+    private fun transcriptTurnAssistantIndex(
+        transcript: List<AgentModelClient.ConversationMessage>,
+        anchorMessageId: String,
+    ): Int {
+        val anchorIndex = transcript.indexOfFirst { it.role == "user" && it.messageId == anchorMessageId }
+        if (anchorIndex < 0) return -1
+        var targetIndex = -1
+        for (cursor in anchorIndex + 1 until transcript.size) {
+            val entry = transcript[cursor]
+            if (entry.role == "user") break
+            if (entry.role == "assistant" && !entry.contextSummary) targetIndex = cursor
+        }
+        return targetIndex
+    }
+
+    /** 找到 anchor 轮次的助手条目并替换正文，同时用快照尾段替换其后所有轮次。 */
+    private fun spliceTurnTranscript(
+        transcript: List<AgentModelClient.ConversationMessage>,
+        anchorMessageId: String,
+        text: String,
+        tail: List<AgentModelClient.ConversationMessage>,
+    ): TranscriptSplice {
+        val targetIndex = transcriptTurnAssistantIndex(transcript, anchorMessageId)
+        if (targetIndex < 0) return TranscriptSplice(transcript, applied = false)
+        val head = transcript.take(targetIndex + 1).mapIndexed { index, entry ->
+            if (index == targetIndex) entry.copy(content = text, contentJson = "") else entry
+        }
+        return TranscriptSplice(head + tail, applied = true)
+    }
+
+    private data class TranscriptSplice(
+        val transcript: List<AgentModelClient.ConversationMessage>,
+        val applied: Boolean,
+    )
+
+    private fun toBranchMessage(message: AgentChatMessageUi): MessageRevisionStore.BranchMessage? =
+        when (message) {
+            is UserMessageUi -> MessageRevisionStore.BranchMessage(
+                type = BRANCH_TYPE_USER,
+                id = message.id,
+                content = message.content,
+                images = message.images,
+                isEdited = message.isEdited,
+            )
+            is AgentMessageUi -> MessageRevisionStore.BranchMessage(
+                type = BRANCH_TYPE_ASSISTANT,
+                id = message.id,
+                content = message.content,
+                renderMarkdown = message.renderMarkdown,
+                contextTokens = message.usage?.contextTokens,
+                inputTokens = message.usage?.inputTokens,
+                outputTokens = message.usage?.outputTokens,
+                reasoningTokens = message.usage?.reasoningTokens,
+                cachedTokens = message.usage?.cachedTokens,
+            )
+            is SystemNoticeMessageUi -> MessageRevisionStore.BranchMessage(
+                type = BRANCH_TYPE_SYSTEM_NOTICE,
+                id = message.id,
+                content = message.code.wireValue,
+                detail = message.detail,
+                contextTokens = message.contextTokens,
+            )
+            is ThinkingMessageUi -> MessageRevisionStore.BranchMessage(
+                type = BRANCH_TYPE_THINKING,
+                id = message.id,
+                content = message.content,
+                elapsedSeconds = message.elapsedSeconds,
+            )
+            is ToolActivityMessageUi -> MessageRevisionStore.BranchMessage(
+                type = BRANCH_TYPE_TOOL,
+                id = message.id,
+                toolName = message.toolName,
+                toolStatus = message.status.name,
+                argumentsSummary = message.argumentsSummary,
+                command = message.command,
+                resultSummary = message.resultSummary,
+                imageCount = message.imageCount,
+            )
+            is ToolSummaryMessageUi -> MessageRevisionStore.BranchMessage(
+                type = BRANCH_TYPE_TOOL_SUMMARY,
+                id = message.id,
+                tools = message.tools,
+            )
+            else -> null
+        }
+
+    private fun fromBranchMessage(message: MessageRevisionStore.BranchMessage): AgentChatMessageUi? =
+        when (message.type) {
+            BRANCH_TYPE_USER -> UserMessageUi(
+                id = message.id,
+                content = message.content,
+                images = message.images,
+                isEdited = message.isEdited,
+            )
+            BRANCH_TYPE_ASSISTANT -> AgentMessageUi(
+                id = message.id,
+                content = message.content,
+                isStreaming = false,
+                renderMarkdown = message.renderMarkdown,
+                usage = TokenUsageUi(
+                    contextTokens = message.contextTokens,
+                    inputTokens = message.inputTokens,
+                    outputTokens = message.outputTokens,
+                    reasoningTokens = message.reasoningTokens,
+                    cachedTokens = message.cachedTokens,
+                ).takeUnless { it.isEmpty },
+            )
+            BRANCH_TYPE_SYSTEM_NOTICE -> SystemNoticeCode.fromWireValue(message.content)?.let { code ->
+                SystemNoticeMessageUi(
+                    id = message.id,
+                    code = code,
+                    detail = message.detail,
+                    contextTokens = message.contextTokens,
+                )
+            }
+            BRANCH_TYPE_THINKING -> ThinkingMessageUi(
+                id = message.id,
+                content = message.content,
+                isStreaming = false,
+                elapsedSeconds = message.elapsedSeconds,
+                collapsed = true,
+            )
+            BRANCH_TYPE_TOOL -> ToolActivityMessageUi(
+                id = message.id,
+                toolName = message.toolName,
+                status = message.toolStatus.toRestoredToolStatus(),
+                argumentsSummary = message.argumentsSummary,
+                command = message.command,
+                resultSummary = message.resultSummary,
+                imageCount = message.imageCount,
+            )
+            BRANCH_TYPE_TOOL_SUMMARY -> ToolSummaryMessageUi(id = message.id, tools = message.tools)
+            else -> null
+        }
+
+    private fun String.toRestoredToolStatus(): ToolActivityStatusUi =
+        runCatching { ToolActivityStatusUi.valueOf(this) }.getOrNull()
+            ?.let { status -> if (status == ToolActivityStatusUi.Running) ToolActivityStatusUi.Unknown else status }
+            ?: ToolActivityStatusUi.Unknown
+
+    private fun forgetMessageRevisions(conversationId: String) {
+        try {
+            MessageRevisionStore.forgetConversation(conversationId)
+        } catch (failure: Exception) {
+            showMessageRevisionError(failure)
+        }
+    }
+
     fun deleteConversation(conversationId: String) {
         val wasSelected = selectedConversationId == conversationId
+        forgetMessageRevisions(conversationId)
         conversationsById = conversationsById - conversationId
         conversationTitles = conversationTitles - conversationId
         conversationUpdatedAt = conversationUpdatedAt - conversationId
@@ -1150,6 +1458,7 @@ internal class AgentAppState(
             revisions = removed.roleplayMessages.revisions.filterKeys { it in retainedIds },
         ))
         if (revised.messages.isEmpty()) {
+            forgetMessageRevisions(conversationId)
             conversationsById = conversationsById - conversationId
             conversationTitles = conversationTitles - conversationId
             conversationUpdatedAt = conversationUpdatedAt - conversationId
@@ -1196,6 +1505,7 @@ internal class AgentAppState(
             text = boundary.userMessage.content,
             images = images.toHistoryImages(),
         )
+        recordRevisionForRegeneration(conversationId, boundary, runId)
         if (boundary.contextWasCompacted) showCompactedRevisionNotice()
         launchConversationRun(
             conversationId = conversationId,
@@ -1312,6 +1622,7 @@ internal class AgentAppState(
                     agentBooleanForUi(Prefs.Keys.AGENT_DEVICE_SENSITIVE_READ_TOOLS),
                 deviceSensitiveActionTools =
                     agentBooleanForUi(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
+                shadowTools = agentBooleanForUi(Prefs.Keys.AGENT_SHADOW_TOOLS),
                 thinkingEnabled = permittedReasoningEffort.enablesReasoning,
                 reasoningEffort = permittedReasoningEffort,
             )
@@ -1427,6 +1738,31 @@ internal class AgentAppState(
             appContext.getString(R.string.state_ui_the_earlier_context_has_been_compressed_and_will_cf6c86),
             Toast.LENGTH_LONG,
         ).show()
+    }
+
+    private fun showMessageRevisionError(failure: Exception) {
+        AndroidAgentLogger.warnThrottled("message_revision_ui_failed") {
+            "Message revision action failed: type=${failure.safeLogType()}"
+        }
+        Toast.makeText(appContext, "版本操作失败，请重试", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 版本切换可能回滚/截断后续轮次，按实际结果给用户可见提示。 */
+    private fun showBranchRollbackNotice(
+        branch: MessageRevisionStore.Branch?,
+        laterTurnCount: Int,
+        historyApplied: Boolean,
+    ) {
+        val message = when {
+            branch == null && laterTurnCount > 0 ->
+                appContext.getString(R.string.message_revision_rollback_truncated)
+            branch != null && (!branch.complete || !historyApplied) ->
+                appContext.getString(R.string.message_revision_rollback_partial)
+            laterTurnCount > 0 || branch?.messages?.isNotEmpty() == true ->
+                appContext.getString(R.string.message_revision_rollback_done)
+            else -> null
+        }
+        if (message != null) Toast.makeText(appContext, message, Toast.LENGTH_SHORT).show()
     }
 
     fun attachImages(uris: List<String>) {
@@ -2185,6 +2521,7 @@ internal class AgentAppState(
         acknowledgeRuntimeResult: Boolean = false,
     ) {
         flushPendingRunDelta(runId)
+        val revisionRecord = pendingRevisionRecords.remove(runId)
         val rewriting = result.operation == AgentRuntimeWire.OP_REWRITE_REPLY || isReplyRewrite(runId)
         stopRequestedRunIds.remove(runId)
         if (runId == currentRunId) {
@@ -2240,6 +2577,18 @@ internal class AgentAppState(
         conversationIdForRun(runId)?.let { id -> conversationsById[id]?.let {
             updateConversation(id, RoleplayConversationReducer.linkRun(it, runId))
         } }
+        revisionRecord?.let { record ->
+            if (result.ok && result.content.isNotBlank() && result.operation != AgentRuntimeWire.OP_COMPACT) {
+                try {
+                    MessageRevisionStore.recordGenerated(record.conversationId, record.anchorMessageId, result.content)
+                    conversationsById[record.conversationId]?.let { current ->
+                        updateConversation(record.conversationId, current, updateTimestamp = false)
+                    }
+                } catch (failure: Exception) {
+                    showMessageRevisionError(failure)
+                }
+            }
+        }
         runMessageProjector.clearRun(runId)
         runConversationIds.remove(runId)
         refreshConversationSummaries()
@@ -2435,13 +2784,52 @@ internal class AgentAppState(
         state: AgentChatHomeUiState,
         updateTimestamp: Boolean = true,
     ) {
-        conversationsById = conversationsById + (conversationId to state)
+        val decorated = decorateMessageRevisions(conversationId, state)
+        conversationsById = conversationsById + (conversationId to decorated)
         if (updateTimestamp) {
             conversationUpdatedAt = conversationUpdatedAt + (conversationId to System.currentTimeMillis())
         }
         if (conversationId == selectedConversationId) {
-            homeState = state
+            homeState = decorated
         }
+    }
+
+    /**
+     * 把普通对话的助手版本数量/选中项投影到消息模型，供聊天项渲染「上一版/下一版」切换。
+     * 角色扮演会话由 RoleplayConversationReducer.decorate 处理，这里直接跳过。
+     */
+    private fun decorateMessageRevisions(
+        conversationId: String,
+        state: AgentChatHomeUiState,
+    ): AgentChatHomeUiState {
+        if (state.roleplay != null || !MessageRevisionStore.hasRevisions(conversationId)) return state
+        var anchor: String? = null
+        var changed = false
+        val messages = state.messages.map { message ->
+            when {
+                message is UserMessageUi -> {
+                    anchor = message.id
+                    message
+                }
+                message is AgentMessageUi -> {
+                    val currentAnchor = anchor
+                    val entry = currentAnchor?.let { MessageRevisionStore.entry(conversationId, it) }
+                    if (entry == null || entry.versions.size <= 1) {
+                        message
+                    } else if (
+                        message.candidateCount != entry.versions.size ||
+                        message.selectedCandidate != entry.selected
+                    ) {
+                        changed = true
+                        message.copy(candidateCount = entry.versions.size, selectedCandidate = entry.selected)
+                    } else {
+                        message
+                    }
+                }
+                else -> message
+            }
+        }
+        return if (changed) state.copy(messages = messages) else state
     }
 
     private fun setConversationStreaming(runId: String, isStreaming: Boolean) {
@@ -2577,6 +2965,13 @@ internal class AgentAppState(
         // 数据状态以较粗粒度发布，文字显现由独立的帧时钟连续推进。
         // 这与 Kimi 将流式数据和视觉动画分层的做法一致。
         const val STREAM_UI_UPDATE_INTERVAL_MS = 80L
+
+        const val BRANCH_TYPE_USER = "user"
+        const val BRANCH_TYPE_ASSISTANT = "assistant"
+        const val BRANCH_TYPE_SYSTEM_NOTICE = "system_notice"
+        const val BRANCH_TYPE_THINKING = "thinking"
+        const val BRANCH_TYPE_TOOL = "tool"
+        const val BRANCH_TYPE_TOOL_SUMMARY = "tool_summary"
 
         fun emptyChatState(thinkingEnabled: Boolean): AgentChatHomeUiState =
             AgentChatHomeUiState(

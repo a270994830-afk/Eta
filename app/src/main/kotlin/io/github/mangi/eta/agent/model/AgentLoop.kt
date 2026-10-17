@@ -212,7 +212,11 @@ internal class AgentLoop(
                 val toolsStartedAt = SystemClock.elapsedRealtime()
                 val outcomes = toolCalls.map { call ->
                     val outcome = when (providerResponse.stopReason) {
-                        AssistantStopReason.TOOL_USE -> executeTool(round, call)
+                        // 不少模型/网关在带 tool_calls 的回复里仍报 stop（end_turn）或不报；
+                        // 按"有工具调用就执行"处理，避免这类回复被整批丢弃、Agent 一步也走不动。
+                        AssistantStopReason.TOOL_USE,
+                        AssistantStopReason.END_TURN,
+                        AssistantStopReason.UNKNOWN -> executeTool(round, call)
                         AssistantStopReason.OUTPUT_LIMIT -> rejectedToolOutcome(
                             round, call, "TRUNCATED_TOOL_CALL",
                             "模型输出达到长度上限，工具参数可能不完整；本次调用未执行，请重新提交完整参数。",

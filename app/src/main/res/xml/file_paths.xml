@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 更新包下载目录（update_install 拉起系统安装器时用） -->
+    <external-path name="eta_downloads" path="Download/智能体/" />
+    <external-path name="eta_downloads_plain" path="Download/" />
+    <files-path name="eta_files" path="." />
+    <cache-path name="eta_cache" path="." />
+</paths>

@@ -10,7 +10,6 @@ import io.github.mangi.eta.core.ModuleLogger
 import io.github.mangi.eta.core.safeLogType
 import io.github.mangi.eta.hook.EtaInjectedStrings
 import java.lang.reflect.Method
-import java.lang.reflect.Modifier
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -21,6 +20,8 @@ internal class XiaoAiStreamRenderer(
     private val classLoader: ClassLoader,
     private val dialogId: String,
     private val floatManagerProvider: () -> Any?,
+    private val cardClassName: String = XiaoAiHooks.FLOW_TOAST_CARD_CLASS,
+    private val speech: XiaoAiSpeech = LegacyXiaoAiSpeech(classLoader, logger),
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val card = AtomicReference<Any?>()
@@ -72,7 +73,7 @@ internal class XiaoAiStreamRenderer(
         }
         render(finalText, immediate = true)
         mainHandler.post {
-            if (!cancelled.get()) speak(finalText)
+            if (!cancelled.get()) speech.speak(finalText)
         }
     }
 
@@ -87,14 +88,11 @@ internal class XiaoAiStreamRenderer(
         )
     }
 
-    fun cancel(loader: ClassLoader = classLoader) {
+    fun cancel() {
         if (!cancelled.compareAndSet(false, true)) return
         pendingText.set(null)
         mainHandler.post {
-            runCatching {
-                val player = ttsPlayer(loader) ?: return@runCatching
-                HookSupport.findMethod(player.javaClass, "stopPlay")?.invoke(player)
-            }
+            speech.stop()
         }
     }
 
@@ -117,7 +115,7 @@ internal class XiaoAiStreamRenderer(
         flushPosted.set(false)
         if (cancelled.get()) return
         val text = pendingText.getAndSet(null) ?: return
-        val targetCard = card.get() ?: createCard(text)
+        val targetCard = card.get() ?: createCard(CARD_TITLE)
         if (targetCard == null) {
             pendingText.compareAndSet(null, text)
             if (cardRetryCount.incrementAndGet() <= MAX_CARD_RETRIES) {
@@ -135,12 +133,14 @@ internal class XiaoAiStreamRenderer(
         if (cancelled.get()) return null
         return try {
             val cardClass = Class.forName(
-                XiaoAiHooks.FLOW_TOAST_CARD_CLASS,
+                cardClassName,
                 false,
                 classLoader,
             )
             val created = cardClass.getConstructor(String::class.java).newInstance(initialText)
-            invokeCompatible(created, "setDialogId", dialogId)
+            if (dialogId.isNotBlank()) {
+                invokeCompatible(created, "setDialogId", dialogId)
+            }
             val floatManager = floatManagerProvider()
             if (floatManager == null) {
                 logger.warnThrottled("xiaoai_card_sink_unavailable") {
@@ -159,27 +159,6 @@ internal class XiaoAiStreamRenderer(
         }
     }
 
-    private fun speak(text: String) {
-        try {
-            val player = ttsPlayer(classLoader) ?: return
-            HookSupport.findMethod(player.javaClass, "speakTts", String::class.java)
-                ?.invoke(player, text)
-        } catch (exception: Exception) {
-            logger.warnThrottled("xiaoai_tts_failed") {
-                "超级小爱 Eta 结果朗读失败: type=${exception.safeLogType()}"
-            }
-        }
-    }
-
-    private fun ttsPlayer(loader: ClassLoader): Any? {
-        val playerClass = Class.forName(XiaoAiHooks.TTS_PLAYER_CLASS, false, loader)
-        val singletonField = playerClass.declaredFields.firstOrNull { field ->
-            Modifier.isStatic(field.modifiers) && field.type == playerClass
-        } ?: return null
-        singletonField.isAccessible = true
-        return singletonField.get(null)
-    }
-
     private fun invokeCompatible(target: Any, methodName: String, vararg args: Any?): Any? {
         val method = findCompatibleMethod(target.javaClass, methodName, args) ?: return null
         return method.invoke(target, *args)
@@ -190,8 +169,12 @@ internal class XiaoAiStreamRenderer(
         methodName: String,
         args: Array<out Any?>,
     ): Method? {
-        var current: Class<*>? = clazz
-        while (current != null) {
+        val visited = HashSet<Class<*>>()
+        val queue = ArrayDeque<Class<*>>()
+        queue.add(clazz)
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            if (!visited.add(current)) continue
             val method = HookSupport.findDeclaredMethods(current, makeAccessible = true) { candidate ->
                 candidate.name == methodName &&
                     candidate.parameterTypes.size == args.size &&
@@ -200,7 +183,8 @@ internal class XiaoAiStreamRenderer(
                     }
             }.firstOrNull()
             if (method != null) return method
-            current = current.superclass
+            current.superclass?.let(queue::add)
+            current.interfaces.forEach(queue::add)
         }
         return null
     }
@@ -219,5 +203,8 @@ internal class XiaoAiStreamRenderer(
         const val STREAM_FLUSH_DELAY_MILLIS = 80L
         const val CARD_RETRY_DELAY_MILLIS = 250L
         const val MAX_CARD_RETRIES = 6
+
+        /** 卡片初始标题：避免把「思考中」类占位文本写在标题上（标题不会被 updateCardText 更新）。 */
+        const val CARD_TITLE = "Eta"
     }
 }

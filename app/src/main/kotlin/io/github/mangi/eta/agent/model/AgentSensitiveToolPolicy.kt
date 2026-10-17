@@ -45,5 +45,18 @@ internal object AgentSensitiveToolPolicy {
         "memory_write",
         "character_memory_get",
         "character_memory_write",
+        // 扩展工具族（文件/集成/管理/会话）中的敏感项
+        "file_delete",
+        "file_edit",
+        "file_download",
+        "http_request",
+        "install_app",
+        "uninstall_app",
+        "execute_intent",
+        "send_broadcast",
+        "send_notification",
+        "model_config_test",
+        "conversation_read",
+        "conversation_delete",
     )
 }

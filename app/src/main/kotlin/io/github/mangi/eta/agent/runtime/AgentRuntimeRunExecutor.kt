@@ -24,6 +24,7 @@ import io.github.mangi.eta.agent.skill.SkillRuntime
 import io.github.mangi.eta.agent.skill.PublicGitHubSkillSource
 import io.github.mangi.eta.agent.tool.AgentLocalTools
 import io.github.mangi.eta.agent.tool.AgentToolRequirements
+import io.github.mangi.eta.agent.tool.AgentToolSearch
 import io.github.mangi.eta.agent.tool.AgentToolCapabilities
 import io.github.mangi.eta.agent.tool.PendingSkillConflictCapabilityParser
 import io.github.mangi.eta.agent.tool.ToolExecutionDecision
@@ -164,6 +165,9 @@ internal class AgentRuntimeRunExecutor(
                     request.config.deviceSensitiveActionTools &&
                         currentPermissions().deviceSensitiveActionTools
                 },
+                shadowToolsEnabled = {
+                    request.config.shadowTools && currentPermissions().shadowTools
+                },
                 memoryToolsEnabled = {
                     runBlocking { AgentMemoryRepository.isEnabled() }
                 },
@@ -223,9 +227,36 @@ internal class AgentRuntimeRunExecutor(
                     journal + session.transcript
                 }
             }
-            val runTools = JSONArray(mcpTools.toString()).also { tools ->
+            // MCP 工具默认“延迟加载”：上百个 schema 全量注入会占几万 token、拖慢每一轮模型调用
+            // （实测 344 工具 / ~10 万 token / 每轮 4s）。改为只注册到检索库，模型用 search_tools 按需取；
+            // 显式打开 agent_mcp_tools_eager 才回到旧行为。
+            val mcpToolsEager = io.github.mangi.eta.config.Prefs.isEnabled(
+                io.github.mangi.eta.config.Prefs.Keys.AGENT_MCP_TOOLS_EAGER,
+            )
+            if (mcpToolsEager) {
+                AgentToolSearch.registerDeferredTools(null)
+            } else {
+                AgentToolSearch.registerDeferredTools { mcpTools }
+            }
+            val runTools = JSONArray().also { tools ->
+                if (mcpToolsEager) {
+                    for (index in 0 until mcpTools.length()) {
+                        mcpTools.optJSONObject(index)?.let(tools::put)
+                    }
+                }
                 if (historyTool != null) tools.put(AgentConversationToolCatalog.schema())
                 if (characterMemoryTools != null && memoryEnabled) CharacterMemoryTools.appendSchemas(tools)
+                if (!mcpToolsEager && mcpTools.length() > 0) {
+                    // 延迟模式下给模型一个发现入口：服务器清单（schema 走 search_tools 现取）
+                    val catalog = AgentToolSearch.fullCatalog()
+                    for (index in 0 until catalog.length()) {
+                        val tool = catalog.optJSONObject(index) ?: continue
+                        if (tool.optJSONObject("function")?.optString("name") == "mcp_servers_list") {
+                            tools.put(tool)
+                            break
+                        }
+                    }
+                }
             }
             val runToolExecutor = AgentModelClient.ToolExecutor { call ->
                 if (call.name == AgentConversationToolCatalog.READ_HISTORY && historyTool != null) {

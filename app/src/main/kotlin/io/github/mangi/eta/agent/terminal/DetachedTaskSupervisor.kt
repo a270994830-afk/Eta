@@ -1,6 +1,7 @@
 package io.github.mangi.eta.agent.terminal
 
 import io.github.mangi.eta.core.AgentLogger
+import io.github.mangi.eta.agent.device.RootSuResolver
 
 import android.content.Context
 import java.io.File
@@ -398,7 +399,7 @@ internal class DetachedTaskSupervisor(
         }
         val process = runCatching {
             val builder = if (identity == "root") {
-                ProcessBuilder("su", "-c", payload)
+                ProcessBuilder(RootSuResolver.command(), "-c", payload)
             } else {
                 ProcessBuilder("sh", "-c", payload)
             }
