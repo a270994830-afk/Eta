@@ -1,11 +1,8 @@
 package io.github.mangi.eta.agent.model
 
-import android.os.SystemClock
 import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentRunController
-import io.github.mangi.eta.agent.runtime.AgentTokenUsage
 import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
-import io.github.mangi.eta.core.AndroidAgentLogger
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -48,7 +45,7 @@ internal class AgentLoop(
         val result: AgentModelClient.ToolResult,
     )
 
-    private var toolCallValidator = AgentToolCallValidator(tools)
+    private var availableToolNames = emptySet<String>()
     private val accumulatedReasoning = StringBuilder()
     private val sensitiveToolCallIds = linkedSetOf<String>()
     private var pendingToolImageMessage: JSONObject? = null
@@ -75,7 +72,7 @@ internal class AgentLoop(
     }
 
     fun compactOnly(): Result {
-        context.compact(tools, force = true)
+        context.compact(force = true)
         return Result("", "", emptySet())
     }
 
@@ -89,7 +86,6 @@ internal class AgentLoop(
 
         while (true) {
             runController.throwIfCancelled()
-            val roundStartedAt = SystemClock.elapsedRealtime()
             if (purpose.allowsTools) appendPendingSteeringMessage()
 
             // Anthropic 思考签名绑定发出工具调用时的 system 与 tools；工具结果回传后再刷新目录。
@@ -101,80 +97,53 @@ internal class AgentLoop(
                 JSONArray()
             }
             precedingTools = roundTools
-            toolCallValidator = AgentToolCallValidator(roundTools)
+            availableToolNames = (0 until roundTools.length()).mapNotNullTo(mutableSetOf()) { index ->
+                roundTools.optJSONObject(index)?.optJSONObject("function")?.optString("name")
+            }
             publishTranscript()
-            context.compact(roundTools)
-            var requestMessages = AssistantScreenContextProjection.project(
-                roleplayContext?.projectMessages(messages, roundTools) ?: messages,
+            if (purpose.allowsTools) context.compact()
+            val requestMessages = AssistantScreenContextProjection.project(
+                roleplayContext?.projectMessages(messages) ?: messages,
             )
-            var requestEstimate = AgentContextBudget.rawEstimate(requestMessages, roundTools)
             var roundInputTokens: Int? = null
-            var overflowAttempts = 0
             val reasoningLengthBeforeRound = accumulatedReasoning.length
-            var completedResponse: AgentModelRetry.Result? = null
             val completedRound = try {
-                while (true) {
-                    try {
-                        val response = modelRetry.complete(
-                            initialRound = round,
-                            request = ProviderRequest(config, requestMessages, roundTools, sessionId, purpose),
-                            provider = provider,
-                            controller = runController,
-                            onEvent = { event ->
-                                if (event is AgentEvent.RoundStarted) roundInputTokens = null
-                                onEvent(event)
-                            },
-                            onProviderEvent = { attemptRound, providerEvent ->
-                                if (!purpose.allowsTools && (providerEvent is ProviderEvent.HostedToolStarted ||
-                                        providerEvent is ProviderEvent.BlockStart && providerEvent.kind == AssistantBlockKind.TOOL_CALL)) {
-                                    throw AgentModelFailure("REPLY_REWRITE_TOOL_CALL", false, "改写回复时模型请求了工具，已停止；原回复未改变。")
-                                }
-                                if (providerEvent is ProviderEvent.Usage) {
-                                    roundInputTokens = providerEvent.contextInputTokens ?: roundInputTokens
-                                }
-                                if (providerEvent is ProviderEvent.BlockDelta &&
-                                    providerEvent.kind == AssistantBlockKind.THINKING
-                                ) {
-                                    accumulatedReasoning.append(providerEvent.delta)
-                                }
-                                providerEvent.toAgentEvent(attemptRound)?.let(onEvent)
-                            },
-                            discardAttemptReasoning = { accumulatedReasoning.setLength(reasoningLengthBeforeRound) },
-                        )
-                        if (purpose == ProviderRequestPurpose.CHAT) validateChatResponse(response, roundInputTokens)
-                        completedResponse = response
-                        break
-                    } catch (failure: AgentModelFailure) {
-                        if (failure.code != "CONTEXT_OVERFLOW" || !failure.recoveryAllowed ||
-                            overflowAttempts >= AgentContextBudget.MAX_OVERFLOW_ATTEMPTS) throw failure
-                        overflowAttempts++
-                        accumulatedReasoning.setLength(reasoningLengthBeforeRound)
-                        context.budget.observe(roundInputTokens?.let { AgentTokenUsage(inputTokens = it) }, requestEstimate)
-                        context.compact(roundTools, force = true)
-                        requestMessages = AssistantScreenContextProjection.project(
-                            roleplayContext?.projectMessages(messages, roundTools) ?: messages,
-                        )
-                        requestEstimate = AgentContextBudget.rawEstimate(requestMessages, roundTools)
-                        roundInputTokens = null
-                        round++
-                    }
+                modelRetry.complete(
+                    initialRound = round,
+                    request = ProviderRequest(config, requestMessages, roundTools, sessionId, purpose),
+                    provider = provider,
+                    controller = runController,
+                    onEvent = { event ->
+                        if (event is AgentEvent.RoundStarted) roundInputTokens = null
+                        onEvent(event)
+                    },
+                    onProviderEvent = { attemptRound, providerEvent ->
+                        if (!purpose.allowsTools && (providerEvent is ProviderEvent.HostedToolStarted ||
+                                providerEvent is ProviderEvent.BlockStart && providerEvent.kind == AssistantBlockKind.TOOL_CALL)) {
+                            throw AgentModelFailure("REPLY_REWRITE_TOOL_CALL", false, "改写回复时模型请求了工具，已停止；原回复未改变。")
+                        }
+                        if (providerEvent is ProviderEvent.Usage) {
+                            roundInputTokens = providerEvent.contextInputTokens ?: roundInputTokens
+                        }
+                        if (providerEvent is ProviderEvent.BlockDelta &&
+                            providerEvent.kind == AssistantBlockKind.THINKING
+                        ) {
+                            accumulatedReasoning.append(providerEvent.delta)
+                        }
+                        providerEvent.toAgentEvent(attemptRound)?.let(onEvent)
+                    },
+                    discardAttemptReasoning = { accumulatedReasoning.setLength(reasoningLengthBeforeRound) },
+                ).also { response ->
+                    rejectContentFilter(response.response)
+                    if (purpose == ProviderRequestPurpose.CHAT) validateChatResponse(response.response)
                 }
-                checkNotNull(completedResponse)
             } finally {
                 // 同一回合的重试仍需原始观察；整个回合结束后才移除截图。
                 discardPendingToolImageMessage()
             }
-            context.budget.observe(
-                roundInputTokens?.let { AgentTokenUsage(inputTokens = it) },
-                requestEstimate,
-            )
+            context.observeInputTokens(roundInputTokens)
             round = completedRound.round
             val providerResponse = completedRound.response
-            // 性能诊断：每个回合的模型耗时与上下文估算（logcat 关键字 AgentPerf，供定位“慢在哪一步”）。
-            AndroidAgentLogger.info(
-                "AgentPerf round=$round model_ms=${SystemClock.elapsedRealtime() - roundStartedAt} " +
-                    "tools=${roundTools.length()} est_tokens=$requestEstimate"
-            )
 
             runController.throwIfCancelled()
             val assistantMessage = providerResponse.assistantMessage
@@ -209,14 +178,9 @@ internal class AgentLoop(
             )
 
             if (toolCalls.isNotEmpty()) {
-                val toolsStartedAt = SystemClock.elapsedRealtime()
                 val outcomes = toolCalls.map { call ->
                     val outcome = when (providerResponse.stopReason) {
-                        // 不少模型/网关在带 tool_calls 的回复里仍报 stop（end_turn）或不报；
-                        // 按"有工具调用就执行"处理，避免这类回复被整批丢弃、Agent 一步也走不动。
-                        AssistantStopReason.TOOL_USE,
-                        AssistantStopReason.END_TURN,
-                        AssistantStopReason.UNKNOWN -> executeTool(round, call)
+                        AssistantStopReason.TOOL_USE -> executeTool(round, call)
                         AssistantStopReason.OUTPUT_LIMIT -> rejectedToolOutcome(
                             round, call, "TRUNCATED_TOOL_CALL",
                             "模型输出达到长度上限，工具参数可能不完整；本次调用未执行，请重新提交完整参数。",
@@ -231,10 +195,6 @@ internal class AgentLoop(
                     outcome
                 }
                 appendToolImages(round, outcomes)
-                AndroidAgentLogger.info(
-                    "AgentPerf round=$round tool_batch_ms=${SystemClock.elapsedRealtime() - toolsStartedAt} " +
-                        "calls=${toolCalls.size} names=${toolCalls.joinToString(",") { it.name }}"
-                )
                 publishTranscript()
                 round += 1
                 continue
@@ -255,7 +215,7 @@ internal class AgentLoop(
             }
 
             publishTranscript()
-            if (purpose.allowsTools) context.compact(roundTools, final = true)
+            if (purpose.allowsTools) context.compact(final = true)
             onEvent(AgentEvent.RunFinished(round = round, contentChars = content.length))
             return Result(
                 content = content,
@@ -265,22 +225,36 @@ internal class AgentLoop(
         }
     }
 
-    private fun validateChatResponse(result: AgentModelRetry.Result, inputTokens: Int?) {
-        val response = result.response
+    /**
+     * 拒答或过滤会在流中途截断回复，半截正文、思考块和工具调用都不能进入上下文：
+     * 带着被截断的签名块继续请求会被上游判定为改动了 thinking 块，同一会话随后每轮都会 400。
+     * 因此不写入 history、不执行工具，直接结束本次运行，由用户改写请求或换模型。
+     */
+    private fun rejectContentFilter(response: ProviderResponse) {
+        if (response.stopReason != AssistantStopReason.CONTENT_FILTER) return
+        val explanation = response.assistantMessage.optJSONObject("stop_details")
+            ?.let { details -> details.optString("explanation").takeUnless { details.isNull("explanation") } }
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        throw AgentModelFailure(
+            "MODEL_CONTENT_FILTER",
+            false,
+            buildString {
+                append("模型服务商拦截了本次回复，未完成的内容已丢弃。")
+                explanation?.let { append("服务商说明：").append(it) }
+                append("请修改或删除触发拦截的请求后重试，或换用其他模型。")
+            },
+        )
+    }
+
+    private fun validateChatResponse(response: ProviderResponse) {
         val message = response.assistantMessage
         if (AgentConversationCodec.parseToolCalls(message).isNotEmpty()) return
         val content = message.optString("content").trim()
         if (content.isNotBlank() && content != "null") return
-        // length 同时可能表示输出额度用尽；只有实际输入已接近已知窗口时才尝试压缩。
         throw when (response.stopReason) {
-            AssistantStopReason.OUTPUT_LIMIT -> if (inputTokens != null && context.budget.shouldCompact(inputTokens)) {
-                AgentModelFailure("CONTEXT_OVERFLOW", false, "模型输入已接近上下文上限，未能生成完整回复。",
-                    recoveryAllowed = result.recoveryAllowed)
-            } else {
+            AssistantStopReason.OUTPUT_LIMIT ->
                 AgentModelFailure("MODEL_OUTPUT_LIMIT", false, "模型输出额度已耗尽但未生成正文，请检查输出上限或降低思考强度。")
-            }
-            AssistantStopReason.CONTENT_FILTER ->
-                AgentModelFailure("MODEL_CONTENT_FILTER", false, "模型回复被服务商过滤，未返回正文。")
             else -> AgentModelFailure("MODEL_EMPTY_RESPONSE", false, "模型未返回正文或工具调用，请检查服务商状态。")
         }
     }
@@ -311,12 +285,12 @@ internal class AgentLoop(
         toolCall: AgentModelClient.ToolCall,
     ): ToolOutcome {
         runController.throwIfCancelled()
-        toolCallValidator.validate(toolCall)?.let { validationError ->
+        if (toolCall.name !in availableToolNames) {
             return rejectedToolOutcome(
                 round = round,
                 toolCall = toolCall,
-                code = "INVALID_TOOL_ARGUMENTS",
-                message = validationError,
+                code = "TOOL_NOT_AVAILABLE",
+                message = "工具未在本轮能力目录中提供，请使用当前可用工具",
             )
         }
         onEvent(
@@ -409,7 +383,7 @@ internal class AgentLoop(
         discardPendingToolImageMessage()
         val images = imageOutcomes.flatMap { outcome -> outcome.result.images }
         val toolNames = imageOutcomes
-            .map { outcome -> imageOutcomeLabel(outcome) }
+            .map { outcome -> outcome.call.name }
             .distinct()
             .joinToString(", ")
         pendingToolImageMessage = AgentConversationCodec.userMessage(
@@ -438,16 +412,6 @@ internal class AgentLoop(
                 return
             }
         }
-    }
-
-    private fun imageOutcomeLabel(outcome: ToolOutcome): String {
-        val paths = runCatching { JSONObject(outcome.result.content).optJSONArray("paths") }.getOrNull()
-            ?: return outcome.call.name
-        if (paths.length() == 0) return outcome.call.name
-        val labels = (0 until paths.length()).joinToString(", ") { index ->
-            "图${index + 1}=${paths.optString(index)}"
-        }
-        return "${outcome.call.name} ($labels)"
     }
 
     private fun ProviderEvent.toAgentEvent(round: Int): AgentEvent? =

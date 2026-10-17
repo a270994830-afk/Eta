@@ -6,6 +6,7 @@ import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.roleplay.RoleplayBinding
 import io.github.mangi.eta.agent.roleplay.RoleplayMessageState
 import io.github.mangi.eta.data.model.ReasoningEffort
+import io.github.mangi.eta.ui.components.RoleplayChatUi
 
 @Immutable
 internal data class AgentChatUiState(
@@ -25,6 +26,8 @@ internal data class AgentChatUiState(
     val messageEdit: MessageEditUiState? = null,
     val roleplay: RoleplayBinding? = null,
     val roleplayMessages: RoleplayMessageState = RoleplayMessageState(),
+    /** 会话最近一次发送使用的本地 Model.id；null 表示尚未绑定，跟随默认模型。 */
+    val modelId: String? = null,
 ) {
     val canCompactContext: Boolean get() = !isStreaming && messageEdit == null && history.any {
         !it.contextSummary && (it.role == "assistant" || it.role == "tool")
@@ -181,3 +184,8 @@ data class MessageEditUiState(
     val hasLaterTurns: Boolean,
     val preserveFollowingMessages: Boolean = false,
 )
+
+/** 角色对话在界面上的身份投影；普通对话返回 null。 */
+internal fun AgentChatHomeUiState.roleplayChatUi(): RoleplayChatUi? = roleplay?.let {
+    RoleplayChatUi(characterName = it.characterName, avatarPath = it.avatarPath, userName = it.userName)
+}

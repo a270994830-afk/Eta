@@ -43,6 +43,8 @@ data class SpeechSettings(
     val asr: AsrProvider = AsrProvider.SYSTEM,
     val tts: TtsProvider = TtsProvider.NONE,
     val autoSpeak: Boolean = false,
+    /** 聊天页回答完成后自动朗读最终回答；与助手浮窗的自动播报分开保存。 */
+    val chatAutoSpeak: Boolean = false,
     val language: String = "",
     val qwenAsr: QwenSpeechConfig = QwenSpeechConfig(),
     val qwenTts: QwenSpeechConfig = QwenSpeechConfig(),
@@ -51,7 +53,16 @@ data class SpeechSettings(
     val qwenVoice: String = "Cherry",
     val doubaoVoice: String = "zh_female_vv_uranus_bigtts",
     val oss: SpeechOssConfig = SpeechOssConfig(),
-)
+    /** 助手浮窗停顿多久后自动发送；0 表示只在用户点击完成或松手时发送。 */
+    val autoSendSilenceMs: Int = DEFAULT_AUTO_SEND_SILENCE_MS,
+    /** 识别结果交付前使用当前对话模型保守纠错。 */
+    val refineTranscript: Boolean = false,
+) {
+    companion object {
+        const val DEFAULT_AUTO_SEND_SILENCE_MS = 2_000
+        val AUTO_SEND_SILENCE_OPTIONS = listOf(1_000, 1_500, 2_000, 3_000, 0)
+    }
+}
 
 internal enum class SpeechCredentialField { QWEN_ASR, QWEN_TTS, DOUBAO_ASR, DOUBAO_TTS, OSS_KEY_ID, OSS_KEY_SECRET }
 

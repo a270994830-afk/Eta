@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.voice.validateSpeechSettings
 import io.github.mangi.eta.data.model.AsrProvider
+import io.github.mangi.eta.data.model.SpeechSettings
 import io.github.mangi.eta.ui.components.EtaArrowPreference
 import io.github.mangi.eta.ui.components.EtaOverlayDropdownPreference
 import io.github.mangi.eta.ui.components.EtaPreference
@@ -24,8 +25,12 @@ import io.github.mangi.eta.ui.components.EtaPreferenceColors
 import io.github.mangi.eta.ui.components.EtaPreferenceGroup
 import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
 import io.github.mangi.eta.ui.components.EtaPreferenceIcon
+import io.github.mangi.eta.ui.components.EtaSwitchPreference
 import io.github.mangi.eta.ui.components.EtaTextButton
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
+import io.github.mangi.eta.ui.components.StatusError
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun SpeechRecognitionScreen(onBack: () -> Unit, onOpenOss: () -> Unit) {
@@ -41,9 +46,7 @@ internal fun SpeechRecognitionScreen(onBack: () -> Unit, onOpenOss: () -> Unit) 
         modifier = Modifier.imePadding(),
     ) {
         if (!store.loaded) {
-            item(key = "loading") {
-                SpeechNote(store.message ?: stringResource(R.string.speech_loading))
-            }
+            item(key = "loading") { SpeechLoadingState(store.message) }
             return@MiuixScaffoldPage
         }
         item(key = "service_title") {
@@ -91,6 +94,12 @@ internal fun SpeechRecognitionScreen(onBack: () -> Unit, onOpenOss: () -> Unit) 
                 }
             }
         }
+        item(key = "result_title") {
+            EtaPreferenceGroupTitle(stringResource(R.string.speech_group_result))
+        }
+        item(key = "result") {
+            SpeechResultSection(store)
+        }
         if (settings.asr == AsrProvider.QWEN_FILE) {
             item(key = "oss") {
                 EtaPreferenceGroup {
@@ -116,6 +125,43 @@ internal fun SpeechRecognitionScreen(onBack: () -> Unit, onOpenOss: () -> Unit) 
     }
 }
 
+/** 短音频与文件转写只在录音结束后识别，没有停顿判定，因此只对流式与系统识别提供自动发送。 */
+@Composable
+private fun SpeechResultSection(store: SpeechSettingsStore) {
+    val settings = store.settings
+    val streaming = settings.asr != AsrProvider.QWEN_FLASH && settings.asr != AsrProvider.QWEN_FILE
+    val options = SpeechSettings.AUTO_SEND_SILENCE_OPTIONS
+    Column {
+        EtaPreferenceGroup {
+            if (streaming) {
+                EtaOverlayDropdownPreference(
+                    title = stringResource(R.string.speech_auto_send_title),
+                    items = options.map { millis ->
+                        if (millis == 0) {
+                            stringResource(R.string.speech_auto_send_off)
+                        } else {
+                            stringResource(R.string.speech_auto_send_seconds, (millis / 1_000f).toString().removeSuffix(".0"))
+                        }
+                    },
+                    selectedIndex = options.indexOf(settings.autoSendSilenceMs)
+                        .takeIf { it >= 0 }
+                        ?: options.indexOf(SpeechSettings.DEFAULT_AUTO_SEND_SILENCE_MS),
+                    onSelectedIndexChange = { index ->
+                        options.getOrNull(index)?.let { store.edit(settings.copy(autoSendSilenceMs = it)) }
+                    },
+                )
+            }
+            EtaSwitchPreference(
+                title = stringResource(R.string.speech_refine_title),
+                summary = stringResource(R.string.speech_refine_summary),
+                checked = settings.refineTranscript,
+                onCheckedChange = { store.edit(settings.copy(refineTranscript = it)) },
+            )
+        }
+        if (streaming) SpeechNote(stringResource(R.string.speech_auto_send_note))
+    }
+}
+
 /** 使用当前草稿调用正式识别链路；进行中点击行完成，右侧可取消。 */
 @Composable
 private fun SpeechRecognitionTestSection(store: SpeechSettingsStore) {
@@ -132,6 +178,9 @@ private fun SpeechRecognitionTestSection(store: SpeechSettingsStore) {
                     if (state.active) R.string.speech_test_finish else R.string.speech_test_recognition,
                 ),
                 summary = summary,
+                summaryColor = BasicComponentDefaults.summaryColor(
+                    color = if (state.error != null) StatusError else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                ),
                 enabled = !store.saving,
                 onClick = { if (state.active) store.recognition.finish() else request() },
                 endActions = {

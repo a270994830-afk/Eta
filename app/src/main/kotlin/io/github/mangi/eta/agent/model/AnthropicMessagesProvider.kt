@@ -13,6 +13,8 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
     private const val DEFAULT_MAX_TOKENS = 4096
     private const val ADAPTIVE_MODEL_DEFAULT_MAX_TOKENS = 16_384
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+    private val TOP_LEVEL_COMBINATORS = listOf("oneOf", "anyOf", "allOf")
+    private const val TRANSIENT_BLOCK = "_eta_transient"
 
     override val id: String = "anthropic_messages"
 
@@ -54,7 +56,7 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
             )
             .build()
 
-        val call = AgentHttpClient.modelClient.newCall(httpRequest)
+        val call = AgentHttpClient.modelClient(request.purpose).newCall(httpRequest)
         val binding = runController.register { call.cancel() }
         try {
             runController.throwIfCancelled()
@@ -86,37 +88,40 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
     ): JSONObject {
         val systemParts = mutableListOf<String>()
         val anthropicMessages = JSONArray()
-        val latestAssistantIndex = (messages.length() - 1 downTo 0).firstOrNull { index ->
-            messages.optJSONObject(index)?.optString("role") == "assistant"
-        }
+        // 当前轮（最后一条真实用户消息之后）的助手消息都原样带回签名块：工具循环中逐轮保持
+        // 同一前缀，缓存才能在每一轮续用；更早轮次统一去掉思考，形态在各轮之间同样稳定。
+        val currentTurnStart = (messages.length() - 1 downTo 0).firstOrNull { index ->
+            messages.optJSONObject(index)?.let { it.optString("role") == "user" && !it.optBoolean("_eta_observation") } == true
+        } ?: -1
         for (index in 0 until messages.length()) {
             val message = messages.optJSONObject(index) ?: continue
             when (message.optString("role")) {
                 "system" -> providerMessageText(message.opt("content"))
                     .takeIf { it.isNotBlank() }
                     ?.let(systemParts::add)
-                "user" -> anthropicMessages.put(
-                    JSONObject()
-                        .put("role", "user")
-                        .put("content", convertUserContent(message.opt("content")))
+                "user" -> appendTurn(
+                    anthropicMessages,
+                    "user",
+                    convertUserContent(message.opt("content")).also { blocks ->
+                        if (message.optBoolean("_eta_observation")) {
+                            for (block in 0 until blocks.length()) blocks.optJSONObject(block)?.put(TRANSIENT_BLOCK, true)
+                        }
+                    },
                 )
-                "assistant" -> anthropicMessages.put(
-                    JSONObject()
-                        .put("role", "assistant")
-                        .put("content", convertAssistantContent(message, index == latestAssistantIndex))
+                "assistant" -> appendTurn(
+                    anthropicMessages,
+                    "assistant",
+                    convertAssistantContent(message, index > currentTurnStart),
                 )
-                "tool" -> anthropicMessages.put(
-                    JSONObject()
-                        .put("role", "user")
-                        .put(
-                            "content",
-                            JSONArray().put(
-                                JSONObject()
-                                    .put("type", "tool_result")
-                                    .put("tool_use_id", message.optString("tool_call_id"))
-                                    .put("content", message.optString("content"))
-                            )
-                        )
+                "tool" -> appendTurn(
+                    anthropicMessages,
+                    "user",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("type", "tool_result")
+                            .put("tool_use_id", message.optString("tool_call_id"))
+                            .put("content", message.optString("content"))
+                    ),
                 )
             }
         }
@@ -128,14 +133,60 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
             .put("messages", anthropicMessages)
             .also { request ->
                 val system = systemParts.joinToString("\n\n").trim()
-                if (system.isNotBlank()) request.put("system", system)
-                convertTools(tools)?.let { request.put("tools", it) }
+                if (system.isNotBlank()) {
+                    request.put("system", JSONArray().put(cacheBreakpoint(JSONObject().put("type", "text").put("text", system))))
+                }
+                convertTools(tools)?.let { converted ->
+                    converted.optJSONObject(converted.length() - 1)?.let(::cacheBreakpoint)
+                    request.put("tools", converted)
+                }
+                markConversationBreakpoint(anthropicMessages)
                 RequestBodyMerge.mergeCustomBody(request, config.customBody)
                 val explicitMaxTokens = request.opt("max_tokens")
                     .takeIf { config.customBody.any { body -> body.key == "max_tokens" } }
                 ProviderReasoning.applyAnthropicRequest(request, config)
                 if (explicitMaxTokens != null) request.put("max_tokens", explicitMaxTokens)
             }
+    }
+
+    /**
+     * Anthropic 只缓存显式标记的前缀。工具目录与系统提示各设一个断点，跨会话复用；
+     * 最后一条消息再设一个随轮前移的断点，下一轮按最长匹配前缀读取，覆盖整个工具循环。
+     */
+    private fun cacheBreakpoint(block: JSONObject): JSONObject =
+        block.put("cache_control", JSONObject().put("type", "ephemeral"))
+
+    private fun markConversationBreakpoint(messages: JSONArray) {
+        val content = messages.optJSONObject(messages.length() - 1)?.optJSONArray("content") ?: return
+        val blocks = (0 until content.length()).mapNotNull(content::optJSONObject)
+        // 观察截图只活一轮，断点落在它之前才能被下一轮命中；思考块不可标记，空文本标记会被拒绝。
+        val target = blocks.lastOrNull { block ->
+            !block.optBoolean(TRANSIENT_BLOCK) && when (block.optString("type")) {
+                "text" -> block.optString("text").isNotEmpty()
+                "image", "tool_result", "tool_use", "document" -> true
+                else -> false
+            }
+        }
+        target?.let(::cacheBreakpoint)
+        // 标记只服务于选断点，发送前从所有消息中清除。
+        for (message in 0 until messages.length()) {
+            val blocksOfMessage = messages.optJSONObject(message)?.optJSONArray("content") ?: continue
+            for (block in 0 until blocksOfMessage.length()) blocksOfMessage.optJSONObject(block)?.remove(TRANSIENT_BLOCK)
+        }
+    }
+
+    /**
+     * 同一批工具结果、随后的观察图片与用户补充必须落在同一条 user 消息里，且 tool_result 在前。
+     * 官方接口会合并连续同角色消息，但兼容端点不一定这样做，会把第二条 tool_result 判为孤立块。
+     */
+    private fun appendTurn(target: JSONArray, role: String, content: JSONArray) {
+        val previous = target.optJSONObject(target.length() - 1)
+        if (previous?.optString("role") != role) {
+            target.put(JSONObject().put("role", role).put("content", content))
+            return
+        }
+        val merged = previous.getJSONArray("content")
+        for (index in 0 until content.length()) merged.put(content.get(index))
     }
 
     private fun defaultMaxTokens(model: String): Int =
@@ -202,10 +253,20 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
                 JSONObject()
                     .put("name", name)
                     .put("description", function.optString("description"))
-                    .put("input_schema", function.optJSONObject("parameters") ?: JSONObject().put("type", "object"))
+                    .put("input_schema", inputSchema(function.optJSONObject("parameters")))
             )
         }
         return converted.takeIf { it.length() > 0 }
+    }
+
+    /**
+     * input_schema 顶层不接受 oneOf/anyOf/allOf，否则整个请求 400。只在发送副本上移除；
+     * 参数交给对应工具执行，执行结果随工具回合返回模型。
+     */
+    private fun inputSchema(parameters: JSONObject?): JSONObject {
+        parameters ?: return JSONObject().put("type", "object")
+        if (TOP_LEVEL_COMBINATORS.none(parameters::has)) return parameters
+        return JSONObject(parameters.toString()).apply { TOP_LEVEL_COMBINATORS.forEach(::remove) }
     }
 
     private fun convertImageBlock(item: JSONObject): JSONObject? {
@@ -237,6 +298,7 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
         val blocks = linkedMapOf<Int, AnthropicBlock>()
         var sawMessageStop = false
         var finishReason: String? = null
+        var stopDetails: JSONObject? = null
         var usage: AgentTokenUsage? = null
 
         readProviderSse(stream, runController) { event, payload ->
@@ -250,9 +312,11 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
             )
             if (result.messageStop) sawMessageStop = true
             result.finishReason?.let { finishReason = it }
-            result.usage?.let {
-                usage = it
-                onEvent(ProviderEvent.Usage(it, result.contextInputTokens ?: it.inputTokens))
+            result.stopDetails?.let { stopDetails = it }
+            result.usage?.let { delta ->
+                val merged = usage?.mergedWith(delta) ?: delta
+                usage = merged
+                onEvent(ProviderEvent.Usage(merged, merged.contextTokens))
             }
             !sawMessageStop
         }
@@ -274,6 +338,7 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
             .put("finish_reason", finishReason.orEmpty())
             .also { message ->
                 usage?.let { message.put("usage", it.toJson()) }
+                stopDetails?.let { message.put("stop_details", it) }
                 if (toolCalls.isNotEmpty()) {
                     val toolCallIds = toolCalls.mapIndexed { position, block ->
                         block.index to block.id.ifBlank { "tool_call_$position" }
@@ -334,14 +399,7 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
                 "Anthropic SSE 返回错误",
             )
             "message_start" -> {
-                val rawUsage = json.optJSONObject("message")?.optJSONObject("usage")
-                EventResult(
-                    usage = parseUsage(rawUsage),
-                    contextInputTokens = rawUsage?.firstInt("input_tokens")?.let { input ->
-                        input + (rawUsage.firstInt("cache_read_input_tokens") ?: 0) +
-                            (rawUsage.firstInt("cache_creation_input_tokens") ?: 0)
-                    },
-                )
+                EventResult(usage = parseUsage(json.optJSONObject("message")?.optJSONObject("usage")))
             }
             "content_block_start" -> {
                 val index = json.optInt("index")
@@ -432,10 +490,14 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
                 )
                 EventResult()
             }
-            "message_delta" -> EventResult(
-                finishReason = json.optJSONObject("delta")?.optString("stop_reason")?.takeIf { it.isNotBlank() },
-                usage = parseUsage(json.optJSONObject("usage"))
-            )
+            "message_delta" -> {
+                val delta = json.optJSONObject("delta")
+                EventResult(
+                    finishReason = delta?.optString("stop_reason")?.takeIf { it.isNotBlank() },
+                    stopDetails = delta?.optJSONObject("stop_details"),
+                    usage = parseUsage(json.optJSONObject("usage"))
+                )
+            }
             "message_stop" -> EventResult(messageStop = true)
             else -> EventResult()
         }
@@ -491,20 +553,39 @@ internal object AnthropicMessagesProvider : AgentProviderClient {
     private data class EventResult(
         val messageStop: Boolean = false,
         val finishReason: String? = null,
+        val stopDetails: JSONObject? = null,
         val usage: AgentTokenUsage? = null,
-        val contextInputTokens: Int? = null,
     )
 
+    /**
+     * Anthropic 不返回 total_tokens；本次请求实际占用的上下文是未缓存输入与缓存读写之和，
+     * 自动压缩与输入框用量都以它为准。
+     */
     private fun parseUsage(usage: JSONObject?): AgentTokenUsage? {
         usage ?: return null
         return AgentTokenUsage(
-            contextTokens = null,
+            contextTokens = usage.firstInt("input_tokens")?.let { input ->
+                input + (usage.firstInt("cache_read_input_tokens") ?: 0) +
+                    (usage.firstInt("cache_creation_input_tokens") ?: 0)
+            },
             inputTokens = usage.firstInt("input_tokens"),
             outputTokens = usage.firstInt("output_tokens"),
             reasoningTokens = usage.firstInt("thinking_output_tokens"),
             cachedTokens = usage.firstInt("cache_read_input_tokens")
         ).takeUnless { it.isEmpty }
     }
+
+    /**
+     * message_start 给出输入用量，message_delta 给出累计输出，部分兼容端点只在 delta 中补发部分字段；
+     * 后到的非空字段覆盖先到的，避免输出用量把输入与上下文占用清空。
+     */
+    private fun AgentTokenUsage.mergedWith(later: AgentTokenUsage) = AgentTokenUsage(
+        contextTokens = later.contextTokens ?: contextTokens,
+        inputTokens = later.inputTokens ?: inputTokens,
+        outputTokens = later.outputTokens ?: outputTokens,
+        reasoningTokens = later.reasoningTokens ?: reasoningTokens,
+        cachedTokens = later.cachedTokens ?: cachedTokens,
+    )
 
     private fun parseJsonObject(raw: String): JSONObject =
         runCatching { JSONObject(raw.ifBlank { "{}" }) }.getOrDefault(JSONObject())

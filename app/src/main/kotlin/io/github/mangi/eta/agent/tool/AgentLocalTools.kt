@@ -1,6 +1,7 @@
 package io.github.mangi.eta.agent.tool
 
 import android.content.Context
+import android.graphics.Rect
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -8,16 +9,20 @@ import android.net.Uri
 import android.os.SystemClock
 import io.github.mangi.eta.agent.browser.AgentBrowserSession
 import io.github.mangi.eta.agent.device.DeviceControlUnavailableException
-import io.github.mangi.eta.agent.device.PrivilegedShell
 import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.device.RootShellDeviceController
 import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
-import io.github.mangi.eta.agent.device.shadow.ShadowToolSet
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.model.AgentHttpClient
+import io.github.mangi.eta.agent.device.LocalNetworkPermission
+import io.github.mangi.eta.agent.web.AgentWebTools
+import io.github.mangi.eta.agent.web.WebHttpTransport
 import io.github.mangi.eta.agent.model.AgentScreenObservationContract
 import io.github.mangi.eta.agent.model.AgentSensitiveToolPolicy
-import io.github.mangi.eta.agent.ocr.OnnxOcrEngine
+import io.github.mangi.eta.agent.model.AgentTerminalToolCatalog
+import io.github.mangi.eta.agent.model.AgentFileToolCatalog
 import io.github.mangi.eta.agent.overlay.AgentHapticFeedback
+import io.github.mangi.eta.agent.overlay.AgentOverlayClearance
 import io.github.mangi.eta.agent.overlay.GestureIndicator
 import io.github.mangi.eta.agent.runtime.AgentAppContext
 import io.github.mangi.eta.agent.skill.SkillCompatibilityChecker
@@ -34,7 +39,7 @@ import io.github.mangi.eta.agent.skill.GitHubSkillInspection
 import io.github.mangi.eta.agent.skill.GitHubSkillRepository
 import io.github.mangi.eta.agent.skill.GitHubSkillSourceException
 import io.github.mangi.eta.agent.skill.PublicGitHubSkillSource
-import io.github.mangi.eta.agent.terminal.AlpineEnvironmentPaths
+import io.github.mangi.eta.agent.terminal.TerminalExecutionContext
 import io.github.mangi.eta.agent.terminal.DetachedTaskSupervisor
 import io.github.mangi.eta.agent.terminal.LinuxEnvironmentPaths
 import io.github.mangi.eta.agent.terminal.terminalEnvironment
@@ -75,11 +80,6 @@ internal class AgentLocalTools(
     private val deviceSensitiveActionToolsEnabled: () -> Boolean = {
         Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS)
     },
-    private val shadowToolsEnabled: () -> Boolean = {
-        Prefs.isEnabled(Prefs.Keys.AGENT_SHADOW_TOOLS)
-    },
-    private val shadowSessionActive: () -> Boolean = { false },
-    private val authSource: () -> AgentAuthPolicy.Source = { AgentAuthPolicy.Source.CHAT },
     private val memoryToolsEnabled: () -> Boolean = {
         runBlocking { AgentMemoryRepository.isEnabled() }
     },
@@ -98,7 +98,7 @@ internal class AgentLocalTools(
     private val skillPackageInstaller: SkillPackageInstaller? = null,
     runAvailableSkillIds: Set<String> = emptySet(),
     pendingSkillConflict: PendingSkillConflictCapability? = null,
-    private val rootAvailable: () -> Boolean = { PrivilegedShell.available() },
+    private val rootAvailable: () -> Boolean = { RootAccess.isGranted },
 ) : AgentModelClient.ToolExecutor, AutoCloseable {
 
     private val closed = AtomicBoolean(false)
@@ -110,64 +110,32 @@ internal class AgentLocalTools(
         root = rootCommandExecutor,
         rootAvailable = rootAvailable,
     )
-    private val shadowTools = ShadowToolSet(
-        logger = logger,
-        rootCommandExecutor = rootCommandExecutor,
-        rootAvailable = rootAvailable,
-        context = context,
-    )
     private val imageTools = AgentImageTools(context, rootCommandExecutor, rootAvailable)
-    private val fileTools = AgentFileToolSet(context, logger, rootCommandExecutor, rootAvailable)
-    private val integrationTools = AgentIntegrationToolSet(
-        context = context,
-        logger = logger,
-        root = rootCommandExecutor,
-        rootAvailable = rootAvailable,
-        httpClient = io.github.mangi.eta.agent.model.AgentHttpClient.client,
+    private val webTools = AgentWebTools(
+        transport = WebHttpTransport(AgentHttpClient.client),
+        localNetworkAccess = { LocalNetworkPermission.accessState(context).name.lowercase(Locale.ROOT) },
     )
-    private val adminTools = AgentAdminToolSet(context, logger)
-    private val sessionTools = AgentSessionToolSet(context, logger)
-    private val mediaTools = AgentMediaToolSet(context, logger)
-    private val bluetoothTools = AgentBluetoothToolSet(context, logger)
-    private val preferenceTools = AgentPreferenceToolSet(context, logger)
-    private val workflowTools = AgentWorkflowToolSet(
-        context = context,
-        logger = logger,
-        stepExecutor = { tool, args -> runWorkflowStep(tool, args) },
-        promptExecutor = { prompt -> runWorkflowPrompt(prompt) },
-    )
-    private val toolPackTools = AgentToolPackToolSet(context, logger)
-    private val updateTools = AgentUpdateToolSet(context, logger)
-    private val recordingTools = AgentRecordingToolSet(context, logger)
-    private val shizukuTools = AgentShizukuToolSet(logger)
-    private val privilegedTools = AgentPrivilegedToolSet(logger)
-    private val petTools = AgentPetToolSet(context, logger)
-    private val appUiDocTools = AgentAppUiDocToolSet(logger)
+    val terminalExecutionContext = LinuxEnvironmentSettingsRepository.current(context).terminalEnvironment.let { environment ->
+        TerminalExecutionContext(
+            linuxEnvironment = environment,
+            linuxRootfsPath = LinuxEnvironmentPaths.rootfsDir(context, checkNotNull(environment.linuxDistribution)).absolutePath,
+        )
+    }
     private val terminalController = RootShellTerminalController(
         logger = logger,
         rootAvailable = rootAvailable,
-        linuxRootfsPath = AlpineEnvironmentPaths.rootfsDir(context).absolutePath,
-        linuxRootfsPathProvider = { environment ->
-            environment.linuxDistribution?.let { distribution ->
-                LinuxEnvironmentPaths.rootfsDir(context, distribution).absolutePath
-            }
-        },
+        executionContext = terminalExecutionContext,
+        backgroundJobs = io.github.mangi.eta.agent.terminal.TerminalRuntime.backgroundJobs(context),
         detachedSupervisor = DetachedTaskSupervisor(
             logger = logger,
             recordsFile = DetachedTaskSupervisor.defaultRecordsFile(context),
-            linuxRootfsPath = AlpineEnvironmentPaths.rootfsDir(context).absolutePath,
-            linuxRootfsPathProvider = { environment ->
-                environment.linuxDistribution?.let { distribution ->
-                    LinuxEnvironmentPaths.rootfsDir(context, distribution).absolutePath
-                }
-            },
+            linuxRootfsPath = terminalExecutionContext.linuxRootfsPath,
             linuxSharedMountsProvider = { SharedFolderMounts.current() },
+            rootAvailable = rootAvailable,
         ),
         linuxSharedMountsProvider = { SharedFolderMounts.current() },
-        selectedLinuxEnvironmentProvider = {
-            LinuxEnvironmentSettingsRepository.current(context).terminalEnvironment
-        },
     )
+
     private val publishedObservation = AtomicReference(PublishedObservation())
     private val runAvailableSkillIds = runAvailableSkillIds
         .mapTo(mutableSetOf(), SkillParser::normalizeSkillLookup)
@@ -181,25 +149,14 @@ internal class AgentLocalTools(
         if (!closed.compareAndSet(false, true)) return
         publishedObservation.set(PublishedObservation())
         AgentBrowserSession.interruptAgentAction(browserRunId)
+        webTools.close()
         terminalController.interruptAll()
-        // 影子屏持有系统级虚拟显示资源，必须在工具集关闭时一并回收，
-        // 避免 sidecar 进程存活到下一个任务周期之外。
-        runCatching { shadowTools.release() }
-            .onFailure { logger.warn("Agent shadow release failed on close message=${it.message}") }
-        deviceController.close()
         rootCommandExecutor.close()
         githubSkillSource?.close()
         inspectedGitHubSnapshots.clear()
     }
 
-    override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult {
-        val startedAt = SystemClock.elapsedRealtime()
-        val result = executeToolCall(toolCall)
-        logger.info("AgentPerf tool=${toolCall.name} ms=${SystemClock.elapsedRealtime() - startedAt}")
-        return result
-    }
-
-    private fun executeToolCall(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
+    override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
         runCatching {
             val args = JSONObject(toolCall.argumentsJson.ifBlank { "{}" })
             if (AgentToolRequirements.find(toolCall.name) != null &&
@@ -209,7 +166,6 @@ internal class AgentLocalTools(
             }
             deviceToolPermissionError(toolCall.name)?.let { return@runCatching it }
             memoryToolPermissionError(toolCall.name)?.let { return@runCatching it }
-            toolPermissionError(toolCall.name)?.let { return@runCatching it }
             when (val decision = beforeToolExecution(toolCall.name)) {
                 ToolExecutionDecision.Allow -> Unit
                 is ToolExecutionDecision.Reject -> {
@@ -222,134 +178,47 @@ internal class AgentLocalTools(
                     )
                 }
             }
-            val toolResult = when (toolCall.name) {
-                "tool_permission_approve" -> textResult(toolPermissionApprove(args))
-                "get_current_context" -> textResult(DeviceContextTool.current(context))                "search_apps" -> textResult(searchApps(args))
+            when (toolCall.name) {
+                "get_current_context" -> textResult(DeviceContextTool.current(context))
+                "search_apps" -> textResult(searchApps(args))
                 "launch_app" -> textResult(launchApp(args))
                 "open_uri" -> textResult(openUri(args))
                 "browser_use" -> browserUse(args, toolCall.id)
+                "web_search", "fetch_url" -> {
+                    if (!browserToolsEnabled()) textResult(errorResult("BROWSER_TOOLS_DISABLED", "请先启用网页搜索、读取与浏览器工具"))
+                    else textResult(webTools.execute(toolCall.name, args))
+                }
                 "observe_screen" -> observeScreen(args)
-                "tap" -> textResult(tap(args))
-                "tap_text" -> textResult(tapText(args))
-                "tap_area" -> textResult(tapArea(args))
-                "tap_element" -> textResult(tapElement(args))
-                "long_press" -> textResult(longPress(args))
-                "long_press_element" -> textResult(longPressElement(args))
-                "double_tap" -> textResult(doubleTap(args))
-                "swipe" -> textResult(swipe(args))
-                "scroll" -> textResult(deviceController.scroll(args.optString("direction")))
-                "scroll_element" -> textResult(scrollElement(args))
-                "input_text" -> textResult(inputText(args))
-                "replace_text" -> textResult(replaceText(args))
-                "clear_text" -> textResult(clearText(args))
+                "tap" -> afterAction(tap(args))
+                "tap_area" -> afterAction(tapArea(args))
+                "tap_element" -> afterAction(tapElement(args))
+                "long_press" -> afterAction(longPress(args))
+                "long_press_element" -> afterAction(longPressElement(args))
+                "swipe" -> afterAction(swipe(args))
+                "scroll" -> afterAction(deviceController.scroll(args.optString("direction"), args.optString("amount")))
+                "scroll_element" -> afterAction(scrollElement(args))
+                "type_text" -> afterAction(typeText(args))
+                // 旧会话或旧入口仍可能请求这些工具名；保留执行路径，但不再出现在模型目录里。
+                "input_text" -> afterAction(inputText(args))
+                "replace_text" -> afterAction(replaceText(args))
+                "clear_text" -> afterAction(clearText(args))
                 "set_clipboard" -> textResult(setClipboard(args))
                 "get_clipboard" -> textResult(getClipboard())
-                "paste_text" -> textResult(pasteText(args))
-                "press_key" -> textResult(deviceController.pressKey(args.optString("button")))
+                "paste_text" -> afterAction(pasteText(args))
+                "press_key" -> afterAction(deviceController.pressKey(args.optString("button")))
                 "wait" -> textResult(deviceController.waitMs(args.optInt("duration_ms", 1_000)))
                 "wait_for_text" -> textResult(waitForText(args))
                 "wait_for_package" -> textResult(waitForPackage(args))
                 "open_system_panel" -> textResult(deviceController.openSystemPanel(args.optString("panel")))
-                "note_add" -> textResult(noteAdd(args))
-                "note_list" -> textResult(noteList())
-                "note_clear" -> textResult(noteClear())
-                "search_tools" -> textResult(AgentToolSearch.search(args.optString("query"), args.optInt("limit", 12)))
-                in AgentFileToolSet.TOOL_NAMES ->
-                    textResult(
-                        terminalTool {
-                            fileTools.execute(toolCall.name, args)
-                                ?: errorResult("UNKNOWN_TOOL", "未知文件工具：${toolCall.name}")
-                        }
-                    )
-                in AgentIntegrationToolSet.TOOL_NAMES ->
-                    textResult(
-                        integrationTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知集成工具：${toolCall.name}")
-                    )
-                in AgentAdminToolSet.TOOL_NAMES ->
-                    textResult(
-                        adminTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知管理工具：${toolCall.name}")
-                    )
-                in AgentSessionToolSet.TOOL_NAMES ->
-                    textResult(
-                        sessionTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知会话工具：${toolCall.name}")
-                    )
-                in AgentMediaToolSet.TOOL_NAMES ->
-                    textResult(
-                        mediaTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知媒体工具：${toolCall.name}")
-                    )
-                in AgentBluetoothToolSet.TOOL_NAMES ->
-                    textResult(
-                        bluetoothTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知蓝牙工具：${toolCall.name}")
-                    )
-                in AgentPreferenceToolSet.TOOL_NAMES ->
-                    textResult(
-                        preferenceTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知偏好工具：${toolCall.name}")
-                    )
-                in AgentWorkflowToolSet.TOOL_NAMES ->
-                    textResult(
-                        workflowTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知工作流工具：${toolCall.name}")
-                    )
-                in AgentToolPackToolSet.TOOL_NAMES ->
-                    textResult(
-                        toolPackTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知插件包工具：${toolCall.name}")
-                    )
-                in AgentUpdateToolSet.TOOL_NAMES ->
-                    textResult(
-                        updateTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知更新工具：${toolCall.name}")
-                    )
-                in AgentRecordingToolSet.TOOL_NAMES ->
-                    textResult(
-                        recordingTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知录屏工具：${toolCall.name}")
-                    )
-                in AgentShizukuToolSet.TOOL_NAMES ->
-                    textResult(
-                        shizukuTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知 Shizuku 工具：${toolCall.name}")
-                    )
-                in AgentPrivilegedToolSet.TOOL_NAMES ->
-                    textResult(
-                        privilegedTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知特权工具：${toolCall.name}")
-                    )
-                in AgentPetToolSet.TOOL_NAMES ->
-                    textResult(
-                        petTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知桌宠工具：${toolCall.name}")
-                    )
-                in AgentAppUiDocToolSet.TOOL_NAMES ->
-                    textResult(
-                        appUiDocTools.execute(toolCall.name, args)
-                            ?: errorResult("UNKNOWN_TOOL", "未知应用文档工具：${toolCall.name}")
-                    )
-                "flow_start_recording" -> textResult(flowStartRecording(args))
-                "flow_stop_recording" -> textResult(flowStopRecording(args))
-                "flows_list" -> textResult(flowsList())
-                "flow_run" -> textResult(flowRun(args))
-                "flow_update" -> textResult(flowUpdate(args))
-                "flow_delete" -> textResult(flowDelete(args))
                 in DEVICE_TOOL_NAMES ->
                     structuredDeviceTools.execute(toolCall.name, args)
                         ?: textResult(errorResult("UNKNOWN_TOOL", "未知设备工具"))
-                in ShadowToolSet.SHADOW_TOOL_NAMES ->
-                    shadowTools.execute(toolCall.name, args)
-                        ?: textResult(errorResult("UNKNOWN_TOOL", "未知影子屏工具"))
-                "ocr_screen" -> textResult(ocrScreen())
                 "read_image" -> fileVisionTool { imageTools.readImage(args) }
-                "terminal" -> textResult(terminalTool { terminal(args) })
-                "run_command" -> textResult(terminalTool { runCommand(args) })
-                "read_file" -> textResult(terminalTool { readFile(args) })
-                "write_file" -> textResult(terminalTool { writeFile(args) })
-                "list_directory" -> textResult(terminalTool { listDirectory(args) })
+                in AgentTerminalToolCatalog.names -> textResult(terminalTool {
+                    if (toolCall.name == "terminal" && args.optString("action").equals("check_root", ignoreCase = true)) checkRoot()
+                    else terminalController.executeTool(toolCall.name, args)
+                })
+                in AgentFileToolCatalog.names -> textResult(terminalTool { terminalController.fileTool(toolCall.name, args) })
                 "memory_get" -> textResult(memoryGet(args))
                 "memory_write" -> textResult(memoryWrite(args))
                 "skills_list" -> textResult(skillsList(args))
@@ -358,22 +227,18 @@ internal class AgentLocalTools(
                 "skills_list_curated" -> textResult(skillsListCurated())
                 "skills_inspect_github" -> textResult(skillsInspectGitHub(args))
                 "skills_install_from_github" -> textResult(skillsInstallFromGitHub(args))
-                else -> (toolPackTools.execute(toolCall.name, args)
-                    ?: AgentToolPackManager.execute(toolCall.name, args))?.let { textResult(it) }
-                    ?: textResult(
-                        errorResult(
-                            code = "UNKNOWN_TOOL",
-                            message = "未知工具：${toolCall.name}"
-                        )
+                else -> textResult(
+                    errorResult(
+                        code = "UNKNOWN_TOOL",
+                        message = "未知工具：${toolCall.name}"
                     )
+                )
             }
-            recordGuiStepIfNeeded(toolCall.name, args, toolResult)
-            toolResult
         }.getOrElse { throwable ->
             textResult(
                 errorResult(
                     code = when (throwable) {
-                        is InvalidToolArgumentException -> "INVALID_ARGUMENT"
+                        is InvalidToolArgumentException, is org.json.JSONException -> "INVALID_ARGUMENT"
                         is DeviceControlUnavailableException -> "ACCESSIBILITY_UNAVAILABLE"
                         else -> "TOOL_ERROR"
                     },
@@ -388,27 +253,6 @@ internal class AgentLocalTools(
             }
         }
 
-    /** 工具级权限闸门（allow/ask/forbid）；权限管理类工具本身不受限，避免死锁。 */
-    private fun toolPermissionError(toolName: String): AgentModelClient.ToolResult? {
-        if (toolName in PERMISSION_EXEMPT_TOOLS || toolName == "tool_permission_approve") return null
-        val error = AgentToolPermissionStore.checkError(toolName) ?: return null
-        return AgentModelClient.ToolResult(error)
-    }
-
-    /** 授权工具：卡片 UI 不可用时，由外部/MCP 客户端替代用户完成一次授权。 */
-    private fun toolPermissionApprove(args: JSONObject): String {
-        val toolName = args.optString("tool_name").trim()
-        if (toolName.isEmpty()) return errorResult("INVALID_ARGUMENT", "需要 tool_name")
-        val scope = args.optString("scope", AgentToolPermissionStore.SCOPE_ONCE).trim().lowercase()
-        if (!AgentToolPermissionStore.grantTemporary(toolName, scope)) {
-            return errorResult("INVALID_ARGUMENT", "scope 必须是 once/session/always")
-        }
-        return AgentToolPermissionStore.snapshot()
-            .put("approved", toolName)
-            .put("scope", scope)
-            .toString()
-    }
-
     private fun deviceToolPermissionError(
         toolName: String,
     ): AgentModelClient.ToolResult? {
@@ -419,8 +263,6 @@ internal class AgentLocalTools(
                 "DEVICE_SENSITIVE_READ_TOOLS_DISABLED" to "请先允许读取敏感设备信息"
             toolName in DEVICE_SENSITIVE_ACTION_TOOL_NAMES && !deviceSensitiveActionToolsEnabled() ->
                 "DEVICE_SENSITIVE_ACTION_TOOLS_DISABLED" to "请先允许敏感设备操作"
-            toolName in ShadowToolSet.SHADOW_TOOL_NAMES && !shadowToolsEnabled() ->
-                "SHADOW_TOOLS_DISABLED" to "请先在设置中开启影子屏工具"
             else -> null
         } ?: return null
         return AgentModelClient.ToolResult(
@@ -428,67 +270,6 @@ internal class AgentLocalTools(
             sensitive = toolName in DEVICE_SENSITIVE_READ_TOOL_NAMES ||
                 toolName in DEVICE_SENSITIVE_ACTION_TOOL_NAMES,
         )
-    }
-
-    private fun ocrScreen(): String {
-        val capture = deviceController.captureBitmapForOcr()
-            ?: return errorResult("SCREENSHOT_UNAVAILABLE", "无法获取屏幕截图；请确认无障碍服务已开启")
-        val bitmap = capture.bitmap
-        return try {
-            val startedAt = SystemClock.elapsedRealtime()
-            val lines = OnnxOcrEngine.recognize(context, bitmap)
-            if (!capture.complete) {
-                logger.warn(
-                    "Agent ocr_screen capture incomplete: source=${capture.source} " +
-                        "windows=${capture.capturedWindows}/${capture.expectedWindows} " +
-                        "timed_out=${capture.timedOut} lines=${lines.size}"
-                )
-            }
-            val (screenWidth, screenHeight) = deviceController.screenDimensions()
-            val space = RootShellDeviceController.CoordinateSpace(
-                screenWidth = screenWidth,
-                screenHeight = screenHeight,
-                screenshotWidth = bitmap.width,
-                screenshotHeight = bitmap.height,
-            )
-            val items = JSONArray()
-            lines.forEach { line ->
-                val point = space.fromScreenshot(
-                    line.centerX.coerceIn(0, bitmap.width - 1),
-                    line.centerY.coerceIn(0, bitmap.height - 1),
-                )
-                items.put(
-                    JSONObject()
-                        .put("text", line.text)
-                        .put("score", line.score.toDouble())
-                        .put("x", point.x)
-                        .put("y", point.y),
-                )
-            }
-            JSONObject()
-                .put("ok", true)
-                .put("tool", "ocr_screen")
-                .put("count", lines.size)
-                .put("lines", items)
-                .put("elapsed_ms", SystemClock.elapsedRealtime() - startedAt)
-                .put(
-                    "capture",
-                    JSONObject()
-                        .put("source", capture.source)
-                        .put("complete", capture.complete)
-                        .put("windows", "${capture.capturedWindows}/${capture.expectedWindows}")
-                        .put("timed_out", capture.timedOut)
-                        .put("blank", capture.blank)
-                        .put("blank_retries", capture.blankRetries),
-                )
-                .put("note", "坐标为屏幕像素；点击请用 tap 并设置 coordinate_space=screen")
-                .toString()
-        } catch (failure: Throwable) {
-            logger.warn("Agent ocr_screen failed: type=${failure.javaClass.simpleName}")
-            errorResult("OCR_FAILED", failure.message ?: "屏幕文字识别失败")
-        } finally {
-            bitmap.recycle()
-        }
     }
 
     private fun terminalTool(block: () -> String): String {
@@ -547,11 +328,11 @@ internal class AgentLocalTools(
                 revision = revision,
                 startLine = args.getInt("start_line"),
                 endLine = args.getInt("end_line"),
-                content = args.getString("content"),
+                content = args.requiredText("content"),
             )
             "append" -> AgentMemoryMutation.Append(
                 revision = revision,
-                content = args.getString("content"),
+                content = args.requiredText("content"),
             )
             "clear" -> AgentMemoryMutation.Clear(revision)
             else -> error("不支持的记忆写入模式")
@@ -631,22 +412,51 @@ internal class AgentLocalTools(
         )
     }
 
+    /**
+     * 成功的 GUI 动作附带一次轻量观察：只读 UI 树、不截图，节点数减半。
+     * 模型据此确认动作生效并直接用新的 observation_id 继续操作，不必再单独 observe_screen；
+     * 失败或结果未知的动作不附带，保持"先重新观察"的既有约束。
+     */
+    private fun afterAction(raw: String): AgentModelClient.ToolResult {
+        val result = runCatching { JSONObject(raw) }.getOrNull()
+        if (result == null || !result.optBoolean("ok")) return textResult(raw)
+        val before = publishedObservation.get().elements
+        val after = runCatching {
+            screenObservationProvider?.invoke(AFTER_ACTION_OPTIONS)
+                ?: deviceController.observe(
+                    includeScreenshot = false,
+                    includeUiTree = true,
+                    maxNodes = AFTER_ACTION_OPTIONS.maxNodes,
+                )
+        }.getOrElse { throwable ->
+            logger.debug { "Agent local tool after-action observation failed: type=${throwable.javaClass.simpleName}" }
+            return textResult(raw)
+        }
+        val elements = after.elementObservation ?: return textResult(raw)
+        // 新快照取代动作前的快照：旧 index 在界面变化后本就不可靠，继续保留只会让模型误用。
+        publishedObservation.set(publishedObservation.get().copy(elements = elements))
+        result.put("after", AgentAfterActionSummary.build(before, elements))
+        return textResult(result.toString())
+    }
+
     private fun tap(args: JSONObject): String {
         val point = convertPoint(
-            x = args.optInt("x"),
-            y = args.optInt("y"),
+            x = args.getInt("x"),
+            y = args.getInt("y"),
             coordinateSpace = args.optString("coordinate_space")
         )
-        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
-        showTap(point.x, point.y)
-        return deviceController.tap(point.x, point.y)
+        return clearOverlay(point) {
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+            showTap(point.x, point.y)
+            deviceController.tap(point.x, point.y)
+        }
     }
 
     private fun tapArea(args: JSONObject): String {
-        val x1 = args.optInt("x1")
-        val y1 = args.optInt("y1")
-        val x2 = args.optInt("x2")
-        val y2 = args.optInt("y2")
+        val x1 = args.getInt("x1")
+        val y1 = args.getInt("y1")
+        val x2 = args.getInt("x2")
+        val y2 = args.getInt("y2")
         val coordinateSpace = args.optString("coordinate_space")
         val first = convertPoint(x1, y1, coordinateSpace)
         val second = convertPoint(x2, y2, coordinateSpace)
@@ -654,9 +464,11 @@ internal class AgentLocalTools(
             x = ((first.x.toLong() + second.x.toLong()) / 2L).toInt(),
             y = ((first.y.toLong() + second.y.toLong()) / 2L).toInt(),
         )
-        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
-        showTap(point.x, point.y)
-        return deviceController.tap(point.x, point.y)
+        return clearOverlay(point) {
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+            showTap(point.x, point.y)
+            deviceController.tap(point.x, point.y)
+        }
     }
 
     private fun tapElement(args: JSONObject): String {
@@ -666,7 +478,9 @@ internal class AgentLocalTools(
         if (node == null) {
             return errorResult("INVALID_NODE_INDEX", "观察快照中不存在节点 index=$index")
         }
-        val result = deviceController.tapElement(observation, index)
+        val result = clearOverlay(ScreenPoint(node.centerX, node.centerY)) {
+            deviceController.tapElement(observation, index)
+        }
         if (result.isOkJson()) {
             AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
             showTap(node.centerX, node.centerY)
@@ -682,7 +496,9 @@ internal class AgentLocalTools(
         if (node == null) {
             return errorResult("INVALID_NODE_INDEX", "观察快照中不存在节点 index=$index")
         }
-        val result = deviceController.longPressElement(observation, index, durationMs)
+        val result = clearOverlay(ScreenPoint(node.centerX, node.centerY)) {
+            deviceController.longPressElement(observation, index, durationMs)
+        }
         if (result.isOkJson()) {
             AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.LONG_PRESS)
             showLongPress(node.centerX, node.centerY, durationMs)
@@ -692,93 +508,41 @@ internal class AgentLocalTools(
 
     private fun longPress(args: JSONObject): String {
         val point = convertPoint(
-            x = args.optInt("x"),
-            y = args.optInt("y"),
+            x = args.getInt("x"),
+            y = args.getInt("y"),
             coordinateSpace = args.optString("coordinate_space")
         )
         val durationMs = args.optInt("duration_ms", 800)
-        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.LONG_PRESS)
-        showLongPress(point.x, point.y, durationMs)
-        return deviceController.longPress(point.x, point.y, durationMs)
-    }
-
-    private fun doubleTap(args: JSONObject): String {
-        val point = convertPoint(
-            x = args.optInt("x"),
-            y = args.optInt("y"),
-            coordinateSpace = args.optString("coordinate_space")
-        )
-        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
-        showTap(point.x, point.y)
-        val first = deviceController.tap(point.x, point.y, 50L)
-        deviceController.waitMs(90)
-        val second = deviceController.tap(point.x, point.y, 50L)
-        return "双击完成：(${point.x}, ${point.y})；tap1=$first；tap2=$second"
-    }
-
-    private fun notesFile(): java.io.File = java.io.File(context.filesDir, "agent_notes.json")
-
-    private fun readNotes(): JSONArray {
-        return try {
-            val f = notesFile()
-            if (!f.exists()) JSONArray() else JSONArray(f.readText())
-        } catch (e: Exception) {
-            JSONArray()
+        return clearOverlay(point) {
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.LONG_PRESS)
+            showLongPress(point.x, point.y, durationMs)
+            deviceController.longPress(point.x, point.y, durationMs)
         }
-    }
-
-    private fun writeNotes(notes: JSONArray) {
-        try {
-            notesFile().writeText(notes.toString())
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun noteAdd(args: JSONObject): String {
-        val text = args.optString("text").trim()
-        if (text.isEmpty()) return errorResult("INVALID_PARAM", "text 不能为空")
-        val notes = readNotes()
-        notes.put(text)
-        writeNotes(notes)
-        return "已记录备忘（共 ${notes.length()} 条）：$text"
-    }
-
-    private fun noteList(): String {
-        val notes = readNotes()
-        if (notes.length() == 0) return "暂无备忘"
-        val sb = StringBuilder("备忘（${notes.length()} 条）：")
-        for (i in 0 until notes.length()) {
-            sb.append("\n").append(i + 1).append(". ").append(notes.optString(i))
-        }
-        return sb.toString()
-    }
-
-    private fun noteClear(): String {
-        writeNotes(JSONArray())
-        return "已清空备忘"
     }
 
     private fun swipe(args: JSONObject): String {
         val start = convertPoint(
-            x = args.optInt("x1"),
-            y = args.optInt("y1"),
+            x = args.getInt("x1"),
+            y = args.getInt("y1"),
             coordinateSpace = args.optString("coordinate_space")
         )
         val end = convertPoint(
-            x = args.optInt("x2"),
-            y = args.optInt("y2"),
+            x = args.getInt("x2"),
+            y = args.getInt("y2"),
             coordinateSpace = args.optString("coordinate_space")
         )
         val durationMs = args.optInt("duration_ms", 500)
-        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.SWIPE)
-        showSwipe(start.x, start.y, end.x, end.y, durationMs)
-        return deviceController.swipe(
-            start.x,
-            start.y,
-            end.x,
-            end.y,
-            durationMs
-        )
+        return clearOverlay(start, end) {
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.SWIPE)
+            showSwipe(start.x, start.y, end.x, end.y, durationMs)
+            deviceController.swipe(
+                start.x,
+                start.y,
+                end.x,
+                end.y,
+                durationMs
+            )
+        }
     }
 
     private fun scrollElement(args: JSONObject): String {
@@ -786,12 +550,45 @@ internal class AgentLocalTools(
         return deviceController.scrollElement(
             observation = observation,
             index = args.optInt("index", -1),
-            direction = args.optString("direction")
+            direction = args.optString("direction"),
+            amount = args.optString("amount"),
         )
     }
 
+    /**
+     * 统一的文本输入：replace（默认）整体替换为 text，text 为空即清空；append 在光标处插入。
+     * 指定 index 时先确认节点来自最近一次观察；不指定时作用于当前输入焦点。
+     * submit=true 在写入成功后按输入法回车，用于搜索、发送等提交动作。
+     */
+    private fun typeText(args: JSONObject): String {
+        val text = args.requiredText("text")
+        val mode = args.optString("mode", "replace").trim().lowercase(Locale.ROOT).ifBlank { "replace" }
+        val written = when (mode) {
+            "replace" -> replaceText(args)
+            "append" -> {
+                if (text.isEmpty()) return errorResult("INVALID_ARGUMENT", "append 模式的 text 不能为空")
+                if (args.optNullableInt("index") != null) {
+                    return errorResult("INVALID_ARGUMENT", "append 只作用于当前输入焦点；要写入指定输入框请用 mode=replace")
+                }
+                // 长文本走选区插入加粘贴回退，比逐字键入更稳定。
+                if (text.length > TYPE_TEXT_INCREMENTAL_CHARS) pasteText(args) else deviceController.inputText(text)
+            }
+            else -> return errorResult("INVALID_ARGUMENT", "mode 只能是 replace 或 append")
+        }
+        val json = runCatching { JSONObject(written) }.getOrNull() ?: return written
+        json.put("tool", "type_text").put("mode", mode)
+        if (!json.optBoolean("ok") || !args.optBoolean("submit")) return json.toString()
+        val submitted = runCatching { JSONObject(deviceController.pressKey("ENTER")) }.getOrNull()
+        json.put("submitted", submitted?.optBoolean("ok") == true)
+        if (submitted?.optBoolean("ok") != true) {
+            // 文本已写入但提交失败：整体仍算成功，避免模型重复输入；由 submitted=false 提示单独补按回车或点按钮。
+            json.put("submit_error", submitted?.optString("code").orEmpty().ifBlank { "SUBMIT_FAILED" })
+        }
+        return json.toString()
+    }
+
     private fun inputText(args: JSONObject): String {
-        val text = args.optString("text")
+        val text = args.requiredText("text")
         if (text.length > 1_000) {
             return errorResult("TEXT_TOO_LONG", "input_text 最多支持 1000 个字符")
         }
@@ -810,7 +607,7 @@ internal class AgentLocalTools(
             null
         }
         return deviceController.replaceText(
-            text = args.optString("text"),
+            text = args.requiredText("text"),
             index = index,
             observation = observation,
         )
@@ -827,17 +624,17 @@ internal class AgentLocalTools(
     }
 
     private fun setClipboard(args: JSONObject): String =
-        deviceController.clipboardSet(requireContext(), args.optString("text"))
+        deviceController.clipboardSet(requireContext(), args.requiredText("text"))
 
     private fun getClipboard(): String =
         deviceController.clipboardGet(requireContext())
 
     private fun pasteText(args: JSONObject): String =
-        deviceController.pasteText(args.optString("text"))
+        deviceController.pasteText(args.requiredText("text"))
 
     private fun waitForText(args: JSONObject): String =
         deviceController.waitForText(
-            text = args.optString("text"),
+            text = args.requiredText("text"),
             timeoutMs = args.optInt("timeout_ms", 10_000),
             includeDesc = args.optBoolean("include_desc", true),
             matchMode = args.optString("match", "contains")
@@ -849,437 +646,30 @@ internal class AgentLocalTools(
             timeoutMs = args.optInt("timeout_ms", 10_000)
         )
 
-    // ==================== 语义流程（录制/回放） ====================
-
-    private fun flowStartRecording(args: JSONObject): String {
-        val name = args.optString("name").trim()
-        if (name.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少流程名")
-        if (!AgentFlowStore.startRecording(name, args.optString("description"))) {
-            return errorResult("INVALID_ARGUMENT", "流程名无效")
-        }
-        return JSONObject()
-            .put("ok", true)
-            .put("recording", name)
-            .put("message", "录制已开启：接下来用普通 GUI 工具完成任务，成功后调用 flow_stop_recording 保存")
-            .toString()
-    }
-
-    private fun flowStopRecording(args: JSONObject): String {
-        val save = args.optBoolean("save", true)
-        val name = AgentFlowStore.currentRecordingName()
-            ?: return errorResult("NOT_RECORDING", "当前没有进行中的录制")
-        val flow = AgentFlowStore.stopRecording(AgentFlowStore.storeFile(context), save)
-        return if (flow != null) {
-            JSONObject()
-                .put("ok", true)
-                .put("saved", true)
-                .put("flow", flow.name)
-                .put("steps", flow.steps.size)
-                .put("message", "流程已保存，下次可用 flow_run 回放")
-                .toString()
-        } else {
-            JSONObject()
-                .put("ok", true)
-                .put("saved", false)
-                .put("flow", name)
-                .put("message", "录制已结束且未保存")
-                .toString()
-        }
-    }
-
-    private fun flowsList(): String {
-        val flows = AgentFlowStore.listFlows(AgentFlowStore.storeFile(context))
-        val items = JSONArray()
-        flows.forEach { flow ->
-            items.put(
-                JSONObject()
-                    .put("name", flow.name)
-                    .put("description", flow.description)
-                    .put("steps", flow.steps.size)
-                    .put("use_count", flow.useCount)
-            )
-        }
-        return JSONObject().put("ok", true).put("flows", items).toString()
-    }
-
-    private fun flowDelete(args: JSONObject): String {
-        val name = args.optString("name").trim()
-        if (name.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少流程名")
-        return if (AgentFlowStore.deleteFlow(AgentFlowStore.storeFile(context), name)) {
-            JSONObject().put("ok", true).put("deleted", name).toString()
-        } else {
-            errorResult("FLOW_NOT_FOUND", "未找到流程：$name")
-        }
-    }
-
-    private fun flowRun(args: JSONObject): String {
-        val name = args.optString("name").trim()
-        if (name.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少流程名")
-        val storeFile = AgentFlowStore.storeFile(context)
-        val flow = AgentFlowStore.findFlow(storeFile, name)
-            ?: return errorResult("FLOW_NOT_FOUND", "未找到流程：$name")
-        val params = args.optJSONObject("params") ?: JSONObject()
-        flow.steps.forEachIndexed { index, step ->
-            val result = executeFlowStep(step.action, substituteParams(step.args, params))
-            if (!result.isOkJson()) {
-                return JSONObject()
-                    .put("ok", false)
-                    .put("code", "FLOW_STEP_FAILED")
-                    .put(
-                        "message",
-                        "流程「${flow.name}」第 ${index + 1}/${flow.steps.size} 步（${step.action}）执行失败，已中止回放；" +
-                            "请改用 observe_screen + tap_element 等手动方式完成剩余部分",
-                    )
-                    .put("step_index", index)
-                    .put("step_action", step.action)
-                    .put(
-                        "step_error",
-                        runCatching { JSONObject(result).optString("message") }.getOrDefault(result.take(200)),
-                    )
-                    .toString()
-            }
-        }
-        AgentFlowStore.bumpUseCount(storeFile, flow.name)
-        return JSONObject()
-            .put("ok", true)
-            .put("flow", flow.name)
-            .put("steps", flow.steps.size)
-            .put("message", "流程回放完成")
-            .toString()
-    }
-
-    private fun flowUpdate(args: JSONObject): String {
-        val name = args.optString("name").trim()
-        if (name.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少流程名")
-        val stepsJson = args.optJSONArray("steps")
-        if (stepsJson == null || stepsJson.length() == 0) {
-            return errorResult("INVALID_ARGUMENT", "缺少 steps 数组")
-        }
-        val newSteps = (0 until stepsJson.length()).mapNotNull { i ->
-            val obj = stepsJson.optJSONObject(i) ?: return@mapNotNull null
-            val action = canonicalFlowAction(obj.optString("action").trim())
-            if (action.isEmpty()) return@mapNotNull null
-            AgentFlowStore.FlowStep(action, obj.optJSONObject("args") ?: JSONObject())
-        }.filter { step ->
-            step.action in setOf(
-                "launch_app", "open_uri", "tap_text", "tap_xy", "input_text", "replace_text",
-                "clear_text", "swipe", "scroll", "press_key", "wait_text", "wait_package",
-            )
-        }
-        if (newSteps.isEmpty()) {
-            return errorResult("INVALID_ARGUMENT", "steps 中没有有效的步骤")
-        }
-        val updated = AgentFlowStore.updateFlow(
-            AgentFlowStore.storeFile(context),
-            name,
-            args.optInt("replace_from", 0),
-            newSteps,
-        ) ?: return errorResult("FLOW_NOT_FOUND", "未找到流程：$name")
-        return JSONObject()
-            .put("ok", true)
-            .put("flow", updated.name)
-            .put("steps", updated.steps.size)
-            .put("message", "流程已更新，下次回放将使用修正后的步骤")
-            .toString()
-    }
-
-    private fun canonicalFlowAction(action: String): String = when (action) {
-        "tap" -> "tap_xy"
-        "wait_for_text" -> "wait_text"
-        "wait_for_package" -> "wait_package"
-        else -> action
-    }
-
-    private fun executeFlowStep(action: String, stepArgs: JSONObject): String = when (action) {
-        "launch_app" -> launchApp(stepArgs)
-        "open_uri" -> openUri(stepArgs)
-        "tap_text" -> flowTapText(stepArgs)
-        "tap_xy" -> tap(stepArgs)
-        "input_text" -> inputText(stepArgs)
-        "replace_text" -> replaceText(stepArgs)
-        "clear_text" -> clearText(stepArgs)
-        "swipe" -> swipe(stepArgs)
-        "scroll" -> deviceController.scroll(stepArgs.optString("direction"))
-        "press_key" -> deviceController.pressKey(stepArgs.optString("button"))
-        "wait_text" -> waitForText(stepArgs)
-        "wait_package" -> waitForPackage(stepArgs)
-        else -> errorResult("UNKNOWN_FLOW_STEP", "未知步骤类型: $action")
-    }
-
-    /** 回放的语义点击：重新观察当前屏幕，按文本/描述匹配元素后点击，容忍界面小幅变化。 */
-    private fun tapText(args: JSONObject): String {
-        val target = args.optString("text").trim()
-        if (target.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少 text")
-        val ordinal = args.optInt("ordinal", 1).coerceAtLeast(1)
-        val observation = deviceController.observe(
-            includeScreenshot = false,
-            includeUiTree = true,
-            maxNodes = 200,
-        )
-        val elements = observation.elementObservation
-            ?: return errorResult("NO_OBSERVATION", "无法获取当前屏幕节点；请确认无障碍服务已开启")
-        val matches = findTextMatches(elements.nodes, target)
-        if (matches.isEmpty()) {
-            tapTextByOcr(target, ordinal)?.let { return it }
-            return errorResult(
-                code = "ELEMENT_NOT_FOUND",
-                message = "当前屏幕未找到包含「$target」的元素，截图 OCR 回退也未找到；可先 observe_screen 确认界面，或改用 tap_element",
-            )
-        }
-        val node = matches.getOrNull(ordinal - 1) ?: matches.first()
-        // 点击目标选择：文字节点自身 → 包含其中心的最小可点击祖先 → 同行可点击兄弟（如单选圆钮）→ 中心坐标手势
-        val textCenterX = node.bounds.centerX()
-        val textCenterY = node.bounds.centerY()
-        val clickTarget = if (node.clickable) {
-            node
-        } else {
-            val ancestors = elements.nodes.filter { it.clickable && it.bounds.contains(textCenterX, textCenterY) }
-            ancestors.minByOrNull { it.bounds.width().toLong() * it.bounds.height() }
-                ?: elements.nodes
-                    .filter { candidate ->
-                        candidate.clickable && candidate.bounds != node.bounds &&
-                            candidate.bounds.top < node.bounds.bottom &&
-                            candidate.bounds.bottom > node.bounds.top
-                    }
-                    .minByOrNull { kotlin.math.abs(it.bounds.centerX() - textCenterX) }
-        }
-        publishedObservation.set(
-            PublishedObservation(
-                elements = elements,
-                coordinateSpace = observation.coordinateSpace,
-            ),
-        )
-        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
-        val tapPoint = clickTarget ?: node
-        val result = deviceController.tap(tapPoint.bounds.centerX(), tapPoint.bounds.centerY(), durationMs = 120)
-        if (!result.isOkJson()) {
-            return errorResult(
-                code = "TAP_TEXT_FAILED",
-                message = "点击「$target」未成功；可先 observe_screen 后改用 tap_element",
-            )
-        }
-        return result
-    }
-
     /**
-     * 无障碍节点里找不到目标文字时的回退：截图 → 离线 OCR 定位 → 按屏幕坐标点击。
-     * 图片型界面、Canvas、自绘控件对无障碍不可见，但通常仍有可识别的文字。
-     * 返回 null 表示本次回退不可用（截图失败 / 未识别到 / 过程异常），由调用方给出原始错误。
+     * 坐标系必须显式声明。旧版按"上一次观察是否带截图"隐式切换默认值，模型无从得知，
+     * 经常把截图像素当成屏幕像素；缺省时直接报参数错误，让模型在下一步改正。
      */
-    private fun tapTextByOcr(target: String, ordinal: Int): String? {
-        val capture = deviceController.captureBitmapForOcr() ?: return null
-        val bitmap = capture.bitmap
-        return try {
-            val needle = normalizeUiText(target)
-            val candidates = OnnxOcrEngine.recognize(context, bitmap)
-                .mapNotNull { line ->
-                    val haystack = normalizeUiText(line.text)
-                    val rank = when {
-                        haystack == needle -> 0
-                        haystack.contains(needle) -> 1
-                        else -> return@mapNotNull null
-                    }
-                    line to rank
-                }
-                .sortedWith(compareBy({ it.second }, { -it.first.score }))
-            val line = candidates.getOrNull(ordinal - 1)?.first ?: candidates.firstOrNull()?.first
-                ?: return null
-            val (screenWidth, screenHeight) = deviceController.screenDimensions()
-            val space = RootShellDeviceController.CoordinateSpace(
-                screenWidth = screenWidth,
-                screenHeight = screenHeight,
-                screenshotWidth = bitmap.width,
-                screenshotHeight = bitmap.height,
-            )
-            val point = space.fromScreenshot(
-                line.centerX.coerceIn(0, bitmap.width - 1),
-                line.centerY.coerceIn(0, bitmap.height - 1),
-            )
-            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
-            val result = deviceController.tap(point.x, point.y, durationMs = 120)
-            if (!result.isOkJson()) {
-                return errorResult(
-                    code = "TAP_TEXT_FAILED",
-                    message = "OCR 回退点击「${line.text}」未成功；可先用 ocr_screen 拿坐标后手动 tap",
-                )
-            }
-            logger.info(
-                "Agent tap_text ocr fallback: text=${line.text} x=${point.x} y=${point.y} " +
-                    "score=${line.score} capture_complete=${capture.complete}"
-            )
-            runCatching { JSONObject(result) }.getOrElse { JSONObject() }
-                .put("source", "ocr")
-                .put("matched_text", line.text)
-                .put("x", point.x)
-                .put("y", point.y)
-                .toString()
-        } catch (failure: Throwable) {
-            logger.warn("Agent tap_text ocr fallback failed: type=${failure.javaClass.simpleName}")
-            null
-        } finally {
-            bitmap.recycle()
-        }
-    }
-
-    /** 归一化后按文字匹配节点：完全相等优先，其次包含；每级内可点击的排前面。 */
-    private fun findTextMatches(
-        nodes: List<RootShellDeviceController.UiNode>,
-        target: String,
-    ): List<RootShellDeviceController.UiNode> {
-        val needle = normalizeUiText(target)
-        if (needle.isEmpty()) return emptyList()
-        val scored = nodes.mapNotNull { node ->
-            val haystack = normalizeUiText(node.text.ifBlank { node.desc })
-            if (haystack.isEmpty()) return@mapNotNull null
-            val rank = when {
-                haystack == needle -> 0
-                haystack.contains(needle) -> 1
-                else -> return@mapNotNull null
-            }
-            node to rank
-        }
-        return scored
-            .sortedWith(compareBy({ it.second }, { !it.first.clickable }))
-            .map { it.first }
-    }
-
-    private fun normalizeUiText(text: String): String = text.trim()
-        .map { c ->
-            when {
-                c in '\uFF01'..'\uFF5E' -> (c.code - 0xFEE0).toChar()
-                c == '\u3000' -> ' '
-                else -> c
-            }
-        }
-        .joinToString("")
-        .replace("（", "(")
-        .replace("）", ")")
-        .replace("：", ":")
-        .replace("，", ",")
-        .lowercase()
-        .filterNot { it.isWhitespace() }
-
-    private fun flowTapText(stepArgs: JSONObject): String = tapText(stepArgs)
-
-    private fun substituteParams(stepArgs: JSONObject, params: JSONObject): JSONObject {
-        if (params.length() == 0) return stepArgs
-        val result = JSONObject()
-        stepArgs.keys().forEach { key ->
-            var value = stepArgs.optString(key)
-            params.keys().forEach { paramKey ->
-                value = value.replace("{$paramKey}", params.optString(paramKey))
-            }
-            result.put(key, value)
-        }
-        return result
-    }
-
-    /** 录制中：把成功的 GUI 工具调用转成语义步骤存入录制会话。 */
-    private fun recordGuiStepIfNeeded(
-        toolName: String,
-        args: JSONObject,
-        result: AgentModelClient.ToolResult,
-    ) {
-        if (!AgentFlowStore.isRecording) return
-        if (!result.content.isOkJson()) return
-        val step = semanticStepFor(toolName, args) ?: return
-        AgentFlowStore.recordStep(step)
-    }
-
-    private fun semanticStepFor(toolName: String, args: JSONObject): AgentFlowStore.FlowStep? {
-        return when (toolName) {
-            "double_tap" -> AgentFlowStore.FlowStep(
-                "double_tap",
-                JSONObject().put("x", args.optInt("x")).put("y", args.optInt("y")),
-            )
-            "launch_app" -> AgentFlowStore.FlowStep(
-                "launch_app",
-                JSONObject().put("package_name", args.optString("package_name")),
-            )
-            "open_uri" -> AgentFlowStore.FlowStep(
-                "open_uri",
-                JSONObject().put("uri", args.optString("uri")),
-            )
-            "tap" -> {
-                val point = convertPoint(args.optInt("x"), args.optInt("y"), args.optString("coordinate_space"))
-                AgentFlowStore.FlowStep(
-                    "tap_xy",
-                    JSONObject()
-                        .put("x", point.x)
-                        .put("y", point.y)
-                        .put("coordinate_space", "screen"),
-                )
-            }
-            "tap_text" -> AgentFlowStore.FlowStep(
-                "tap_text",
-                JSONObject()
-                    .put("text", args.optString("text"))
-                    .put("ordinal", args.optInt("ordinal", 1)),
-            )
-            "tap_element" -> {
-                val observation = requireElementObservation(args) ?: return null
-                val node = observation.nodes.firstOrNull { it.index == args.optInt("index", -1) } ?: return null
-                val label = node.text.ifBlank { node.desc }.ifBlank { return null }
-                AgentFlowStore.FlowStep(
-                    "tap_text",
-                    JSONObject()
-                        .put("text", label.take(80))
-                        .put("fallback_x", node.bounds.centerX())
-                        .put("fallback_y", node.bounds.centerY())
-                        .put("coordinate_space", "screen"),
-                )
-            }
-            "input_text" -> AgentFlowStore.FlowStep(
-                "input_text",
-                JSONObject().put("text", args.optString("text")).put("mode", args.optString("mode", "append")),
-            )
-            "replace_text" -> AgentFlowStore.FlowStep(
-                "replace_text",
-                JSONObject().put("text", args.optString("text")),
-            )
-            "clear_text" -> AgentFlowStore.FlowStep("clear_text", JSONObject())
-            "swipe" -> {
-                val start = convertPoint(args.optInt("x1"), args.optInt("y1"), args.optString("coordinate_space"))
-                val end = convertPoint(args.optInt("x2"), args.optInt("y2"), args.optString("coordinate_space"))
-                AgentFlowStore.FlowStep(
-                    "swipe",
-                    JSONObject()
-                        .put("x1", start.x)
-                        .put("y1", start.y)
-                        .put("x2", end.x)
-                        .put("y2", end.y)
-                        .put("duration_ms", args.optInt("duration_ms", 500))
-                        .put("coordinate_space", "screen"),
-                )
-            }
-            "scroll" -> AgentFlowStore.FlowStep(
-                "scroll",
-                JSONObject().put("direction", args.optString("direction")),
-            )
-            "press_key" -> AgentFlowStore.FlowStep(
-                "press_key",
-                JSONObject().put("button", args.optString("button")),
-            )
-            "wait_for_text" -> AgentFlowStore.FlowStep(
-                "wait_text",
-                JSONObject()
-                    .put("text", args.optString("text"))
-                    .put("timeout_ms", args.optInt("timeout_ms", 10_000)),
-            )
-            "wait_for_package" -> AgentFlowStore.FlowStep(
-                "wait_package",
-                JSONObject()
-                    .put("package_name", args.optString("package_name"))
-                    .put("timeout_ms", args.optInt("timeout_ms", 10_000)),
-            )
-            else -> null
-        }
-    }
-
     private fun convertPoint(x: Int, y: Int, coordinateSpace: String): ScreenPoint {
         val space = publishedObservation.get().coordinateSpace
         val requestedSpace = coordinateSpace.trim().lowercase(Locale.ROOT)
-        if (requestedSpace == "screen" || (requestedSpace.isBlank() && space == null)) {
+        if (requestedSpace.isBlank()) {
+            throw InvalidToolArgumentException(
+                "缺少 coordinate_space：看截图定位用 normalized（0–999），坐标来自 ui_nodes 用 screen",
+            )
+        }
+        if (requestedSpace == "normalized") {
+            if (x !in 0..NORMALIZED_MAX || y !in 0..NORMALIZED_MAX) {
+                throw InvalidToolArgumentException("normalized 坐标必须在 0–$NORMALIZED_MAX 之间：($x,$y)")
+            }
+            val (width, height) = space?.let { it.screenWidth to it.screenHeight }
+                ?: deviceController.screenDimensions()
+            return ScreenPoint(
+                x = (x.toLong() * (width - 1) / NORMALIZED_MAX).toInt(),
+                y = (y.toLong() * (height - 1) / NORMALIZED_MAX).toInt(),
+            )
+        }
+        if (requestedSpace == "screen") {
             val (width, height) = space?.let { it.screenWidth to it.screenHeight }
                 ?: deviceController.screenDimensions()
             if (x !in 0 until width || y !in 0 until height) {
@@ -1289,9 +679,12 @@ internal class AgentLocalTools(
             }
             return ScreenPoint(x, y)
         }
+        if (requestedSpace != "screenshot") {
+            throw InvalidToolArgumentException("coordinate_space 只能是 normalized、screen 或 screenshot")
+        }
         if (space == null) {
             throw InvalidToolArgumentException(
-                "当前没有可用的截图坐标系；请先 observe_screen，或明确设置 coordinate_space=screen",
+                "最近一次观察没有附图，没有 screenshot 坐标系；看截图定位请用 normalized，或先带截图重新观察",
             )
         }
         val point = runCatching { space.fromScreenshot(x, y) }
@@ -1357,21 +750,12 @@ internal class AgentLocalTools(
         }
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         context.startActivity(launchIntent)
-        // R2 启动真结果校验：等待应用真正到前台（最多 4 秒），避免“发了就算成功”
-        val verify = runCatching { deviceController.waitForPackage(app.packageName, 4_000) }.getOrDefault("")
-        val launchVerified = verify.contains("\"ok\":true")
-        logger.info("Agent local tool action=launch_app outcome=started launch_verified=$launchVerified")
+        logger.info("Agent local tool action=launch_app outcome=started")
         return JSONObject()
             .put("ok", true)
             .put("tool", "launch_app")
             .put("app_name", app.appName)
             .put("package_name", app.packageName)
-            .put("launch_verified", launchVerified)
-            .put(
-                "message",
-                if (launchVerified) "已启动并确认到前台：${app.appName}"
-                else "已发出启动，但 4 秒内未确认 ${app.appName} 到前台（可用 wait_for_package/observe_screen 复核）"
-            )
             .toString()
     }
 
@@ -1404,53 +788,21 @@ internal class AgentLocalTools(
             .toString()
     }
 
-    private fun runCommand(args: JSONObject): String =
-        terminalController.runCommand(
-            command = args.optString("command"),
-            cwd = args.optString("cwd").ifBlank { null },
-            timeoutSeconds = args.optInt("timeout_seconds", 30)
-        )
-
-    private fun terminal(args: JSONObject): String {
-        return terminalController.terminalAction(
-            action = args.optString("action", "open_and_exec"),
-            command = args.optString("command"),
-            cwd = args.optString("cwd").ifBlank { null },
-            timeoutMs = args.optInt("timeout_ms", 30_000),
-            identity = args.optString("identity"),
-            mergeStderr = args.optBoolean("merge_stderr", false),
-            sessionId = args.optString("session_id").ifBlank { null },
-            jobId = args.optString("job_id").ifBlank { null },
-            async = args.optBoolean("async", false),
-            offsetChars = args.optInt("offset_chars", 0),
-            maxChars = args.optInt("max_chars", 8_000),
-            closeIfDone = args.optBoolean("close_if_done", false),
-            environment = args.optString("environment", "android"),
-            taskId = args.optString("task_id").ifBlank { null },
-            wait = args.optBoolean("wait", true),
-        )
+    private fun checkRoot(): String {
+        val probe = RootAccess.request(requireContext())
+        kotlinx.coroutines.runBlocking {
+            while (probe.isActive && !closed.get()) kotlinx.coroutines.delay(100)
+        }
+        if (closed.get()) return errorResult("CANCELLED", "已取消等待 Root 检测")
+        val state = RootAccess.state.value
+        return JSONObject().put("ok", true).put("tool", "terminal").put("action", "check_root")
+            .put("root_available", state.isGranted).put("status", state.status.name.lowercase(Locale.ROOT))
+            .put("checking", state.isChecking).put("su_present", state.suPresent)
+            .put("uid", if (state.isGranted) 0 else JSONObject.NULL)
+            .put("message", if (state.isGranted) "已确认 Root 授权；后续新命令默认使用 Root" else
+                "尚未确认 Root 授权；请根据 status 检查授权或检测结果，默认 user 不表示终端不支持 Root")
+            .toString()
     }
-
-    private fun readFile(args: JSONObject): String =
-        terminalController.readFile(
-            path = args.optString("path"),
-            offsetBytes = args.optInt("offset_bytes", 0),
-            maxBytes = args.optInt("max_bytes", 65_536)
-        )
-
-    private fun writeFile(args: JSONObject): String =
-        terminalController.writeFile(
-            path = args.optString("path"),
-            content = args.optString("content"),
-            append = args.optBoolean("append", false)
-        )
-
-    private fun listDirectory(args: JSONObject): String =
-        terminalController.listDirectory(
-            path = args.optString("path"),
-            showHidden = args.optBoolean("show_hidden", false),
-            limit = args.optInt("limit", 80)
-        )
 
     private fun findAppByPackage(packageName: String): AppInfo? =
         installedLauncherApps().firstOrNull { it.packageName == packageName }
@@ -2004,30 +1356,6 @@ internal class AgentLocalTools(
         errorResult(failure.code, failure.message ?: "GitHub Skill 请求失败")
     }
 
-    /** 工作流步骤执行：复用同一套工具分发；禁止步骤内再触发工作流（防递归）。 */
-    private fun runWorkflowStep(tool: String, args: JSONObject): String {
-        if (tool.startsWith("workflow_")) {
-            return errorResult("WORKFLOW_REENTRANCY", "工作流步骤内不能再调用工作流工具")
-        }
-        return execute(
-            AgentModelClient.ToolCall(
-                id = "wf-step-${System.nanoTime()}",
-                name = tool,
-                argumentsJson = args.toString(),
-            )
-        ).content
-    }
-
-    /** 工作流里的 prompt 步：跑一轮最小 agent（带工具）并返回最终文本。 */
-    private fun runWorkflowPrompt(prompt: String): String = runCatching {
-        AgentModelClient.complete(
-            config = AgentModelClient.loadConfig(),
-            prompt = prompt,
-            toolExecutor = this,
-            sessionId = "workflow-${java.util.UUID.randomUUID()}",
-        ).content
-    }.getOrElse { errorResult("WORKFLOW_PROMPT_FAILED", it.message ?: "prompt 步执行失败") }
-
     private fun errorResult(code: String, message: String): String =
         JSONObject()
             .put("ok", false)
@@ -2053,6 +1381,17 @@ internal class AgentLocalTools(
         val candidatesByPath: Map<String, String>,
     )
 
+    /** 手势经过状态胶囊时让它暂时穿透并淡出；滑动按起止点包围盒判断。 */
+    private fun <T> clearOverlay(vararg points: ScreenPoint, gesture: () -> T): T {
+        val area = Rect(
+            points.minOf { it.x },
+            points.minOf { it.y },
+            points.maxOf { it.x } + 1,
+            points.maxOf { it.y } + 1,
+        )
+        return AgentOverlayClearance.around(area, gesture)
+    }
+
     private fun showTap(x: Int, y: Int) {
         GestureIndicator.showTap(context, x, y)
     }
@@ -2072,33 +1411,19 @@ internal class AgentLocalTools(
     )
 
     private companion object {
-        /** 权限管理类工具本身不受工具权限闸门限制，否则 ask 策略会死锁。 */
-        val PERMISSION_EXEMPT_TOOLS = setOf(
-            "tool_permission_list",
-            "tool_permission_set",
-            "search_tools",
-        )
-        val DEVICE_DIRECT_TOOL_NAMES = setOf(
+        val DEVICE_DIRECT_TOOL_NAMES = io.github.mangi.eta.agent.model.AgentPhoneToolCatalog.direct + setOf(
             "set_alarm",
             "set_timer",
             "device_status",
+            "inspect_app",
             "network_info",
             "top_memory_apps",
             "top_storage_apps",
             "media_control",
             "set_volume",
-            "play_music",
-            "play_video",
-            "web_search",
-            "open_device_action",
-            "order_food",
-            "stock",
-            "short_video",
-            "navigate",
-            "flashlight",
-            "call",
         )
-        val DEVICE_SENSITIVE_READ_TOOL_NAMES = setOf(
+        val DEVICE_SENSITIVE_READ_TOOL_NAMES = io.github.mangi.eta.agent.context.PersonalSearchTools.names + io.github.mangi.eta.agent.model.AgentPhoneToolCatalog.reads + setOf(
+            "search_notes", "search_system_memories",
             "get_setting",
             "wifi_credentials",
             "recent_notifications",
@@ -2131,14 +1456,10 @@ internal class AgentLocalTools(
             "search_qq_chat_images",
             "search_wechat_chat_images",
         )
-        val DEVICE_SENSITIVE_ACTION_TOOL_NAMES = setOf(
+        val DEVICE_SENSITIVE_ACTION_TOOL_NAMES = io.github.mangi.eta.agent.model.AgentPhoneToolCatalog.writes + setOf(
             "set_setting",
             "set_device_state",
             "app_state_control",
-            "create_calendar_event",
-            "send_sms",
-            "set_brightness",
-            "reply_notification",
         )
         val DEVICE_TOOL_NAMES =
             DEVICE_DIRECT_TOOL_NAMES + DEVICE_SENSITIVE_READ_TOOL_NAMES +
@@ -2146,3 +1467,15 @@ internal class AgentLocalTools(
         val MEMORY_TOOL_NAMES = setOf("memory_get", "memory_write")
     }
 }
+
+private val AFTER_ACTION_OPTIONS = AgentScreenObservationContract.Options(
+    includeScreenshot = false,
+    includeUiTree = true,
+    maxNodes = 30,
+)
+
+/** append 超过该长度改走粘贴路径；逐字键入的增量重建对长文本既慢又容易被输入法打断。 */
+private const val TYPE_TEXT_INCREMENTAL_CHARS = 200
+
+/** 归一化坐标上界：0–999，与主流 GUI 模型的输出习惯一致。 */
+private const val NORMALIZED_MAX = 999

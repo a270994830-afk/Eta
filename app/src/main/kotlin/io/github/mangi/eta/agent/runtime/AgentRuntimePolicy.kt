@@ -19,6 +19,7 @@ internal object AgentRuntimePolicy {
         val deviceSensitiveActionTools: Boolean = false,
         val shadowTools: Boolean = false,
         val thinking: Boolean,
+        val autoCompaction: Boolean = Prefs.Keys.BOOLEAN_DEFAULTS.getValue(Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED),
     )
 
     fun permissions(preferences: SharedPreferences?): Permissions =
@@ -32,6 +33,7 @@ internal object AgentRuntimePolicy {
                 preferences.allowed(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
             shadowTools = preferences.allowed(Prefs.Keys.AGENT_SHADOW_TOOLS),
             thinking = preferences.allowed(Prefs.Keys.AGENT_THINKING_ENABLED),
+            autoCompaction = preferences.allowed(Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED),
         )
 
     fun constrain(
@@ -52,6 +54,7 @@ internal object AgentRuntimePolicy {
             shadowTools = config.shadowTools && permissions.shadowTools,
             thinkingEnabled = thinkingEnabled,
             reasoningEffort = effectiveEffort,
+            autoCompactionEnabled = config.autoCompactionEnabled && permissions.autoCompaction,
         )
         if (thinkingEnabled) return constrained
         return constrained.copy(

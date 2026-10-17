@@ -25,18 +25,14 @@ internal class BoundedRootCommandExecutor(
         command: String,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MS,
         maxOutputBytes: Int = DEFAULT_MAX_OUTPUT_BYTES,
-        allowLargeOutput: Boolean = false,
+        input: ByteArray? = null,
     ): Result {
+        if (input != null && input.size > 128 * 1024) return Result.failed("ROOT_INPUT_LIMIT")
         if (closed.get()) return Result.failed("ROOT_EXECUTOR_CLOSED")
-        if (!rootAvailable()) {
-            return PrivilegedShell.shizukuFallback(command, timeoutMillis, maxOutputBytes)
-                ?: Result.failed("ROOT_REQUIRED")
-        }
-        // 默认 2MB 安全上限；截图等确实需要更大输出的调用可显式放开
-        val outputCap = if (allowLargeOutput) MAX_LARGE_OUTPUT_BYTES else MAX_MAX_OUTPUT_BYTES
+        if (!rootAvailable()) return Result.failed("ROOT_REQUIRED")
         val envelope = RootCommandEnvelope(command)
         val process = runCatching {
-            ProcessBuilder(RootSuResolver.command(), "-c", envelope.script)
+            ProcessBuilder("su", "-c", envelope.script)
                 .redirectErrorStream(false)
                 .start()
         }.getOrElse {
@@ -47,27 +43,33 @@ internal class BoundedRootCommandExecutor(
             return Result.failed("ROOT_EXECUTOR_CLOSED")
         }
 
-        val ioPool = Executors.newFixedThreadPool(2)
+        val ioPool = Executors.newFixedThreadPool(if (input == null) 2 else 3)
         return try {
             val stdoutFuture = ioPool.submit<BoundedOutput> {
-                process.inputStream.use { it.readBounded(maxOutputBytes, outputCap) }
+                process.inputStream.use { it.readBounded(maxOutputBytes) }
             }
             val stderrFuture = ioPool.submit<BoundedOutput> {
                 process.errorStream.use {
-                    it.readBounded(maxOutputBytes.coerceIn(1, outputCap) + envelope.markerBytes, outputCap + envelope.markerBytes)
+                    it.readBounded(maxOutputBytes.coerceIn(1, MAX_MAX_OUTPUT_BYTES) + envelope.markerBytes)
                 }
             }
+            // 正文从 stdin 传递，避免进入 su/app_process 的进程参数。
+            val inputFuture = if (input == null) {
+                process.outputStream.close()
+                null
+            } else ioPool.submit { process.outputStream.use { it.write(input) } }
             val completed = runCatching {
                 process.waitFor(timeoutMillis.coerceIn(500L, MAX_TIMEOUT_MS), TimeUnit.MILLISECONDS)
             }.getOrDefault(false)
             if (!completed) {
                 terminate(process)
             }
-            val stdout = runCatching { stdoutFuture.get(IO_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
-                .getOrDefault(BoundedOutput.EMPTY)
+            val stdoutRead = runCatching { stdoutFuture.get(IO_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }.getOrNull()
+            val stdout = stdoutRead ?: BoundedOutput.EMPTY
             val stderrRead = runCatching { stderrFuture.get(IO_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }.getOrNull()
             val stderr = stderrRead ?: BoundedOutput.EMPTY
             val rootOutput = envelope.inspect(stderr.text)
+            val inputWritten = inputFuture == null || runCatching { inputFuture.get(IO_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }.isSuccess
             if (stderrRead != null && rootOutput.denied(completed)) {
                 RootAccess.markDenied()
                 logger.warn("Agent root access outcome=denied code=ROOT_REQUIRED")
@@ -79,6 +81,11 @@ internal class BoundedRootCommandExecutor(
                 stderr = rootOutput.stderr,
                 timedOut = !completed,
                 truncated = stdout.truncated || stderr.truncated,
+                errorCode = when {
+                    !inputWritten -> "ROOT_INPUT_FAILED"
+                    stdoutRead == null || stderrRead == null -> "ROOT_OUTPUT_FAILED"
+                    else -> ""
+                },
             )
         } finally {
             activeProcesses.remove(process)
@@ -111,8 +118,8 @@ internal class BoundedRootCommandExecutor(
         runCatching { process.errorStream.close() }
     }
 
-    private fun InputStream.readBounded(maxBytes: Int, cap: Int = MAX_MAX_OUTPUT_BYTES): BoundedOutput {
-        val limit = maxBytes.coerceIn(1, cap)
+    private fun InputStream.readBounded(maxBytes: Int): BoundedOutput {
+        val limit = maxBytes.coerceIn(1, MAX_MAX_OUTPUT_BYTES)
         val collected = ByteArrayOutputStream(limit.coerceAtMost(32 * 1024))
         val buffer = ByteArray(8 * 1024)
         var truncated = false
@@ -165,9 +172,6 @@ internal class BoundedRootCommandExecutor(
         const val MAX_TIMEOUT_MS = 30_000L
         const val DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024
         const val MAX_MAX_OUTPUT_BYTES = 2 * 1024 * 1024
-
-        /** 显式放开时的上限（影子屏截图需要单次读回整张 PNG 的 base64）。 */
-        const val MAX_LARGE_OUTPUT_BYTES = 24 * 1024 * 1024
         const val IO_JOIN_TIMEOUT_MS = 2_000L
     }
 }

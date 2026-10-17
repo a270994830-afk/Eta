@@ -1,53 +1,45 @@
 package io.github.mangi.eta.ui
 
-import android.app.AlarmManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.AccessibilityNew
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AccountTree
-import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Dashboard
-import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.FilterAlt
 import androidx.compose.material.icons.rounded.GppMaybe
 import androidx.compose.material.icons.rounded.Hearing
+import androidx.compose.material.icons.rounded.ImportContacts
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Inventory
 import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Psychology
-import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SettingsVoice
 import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.SportsBar
 import androidx.compose.material.icons.rounded.SupportAgent
 import androidx.compose.material.icons.rounded.SwipeUp
-import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Terminal
-import androidx.compose.material.icons.rounded.TheaterComedy
 import androidx.compose.material.icons.rounded.TouchApp
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.runtime.Composable
@@ -58,12 +50,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -71,45 +60,36 @@ import io.github.mangi.eta.EtaApp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.accessibility.AccessibilityProtectionClient
 import io.github.mangi.eta.agent.accessibility.AgentAccessibilityService
-import io.github.mangi.eta.agent.reminder.EtaReminderScheduler
-import io.github.mangi.eta.agent.schedule.EtaScheduleScheduler
-import io.github.mangi.eta.agent.schedule.EtaScheduleService
-import io.github.mangi.eta.agent.schedule.EtaScheduleStore
-import io.github.mangi.eta.agent.voice.EtaHotwordService
 import io.github.mangi.eta.config.PowerAssistantTarget
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.data.repository.ProviderRepository
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
+import io.github.mangi.eta.data.update.AppLatestRelease
+import io.github.mangi.eta.data.update.AppUpdateChecker
 import io.github.mangi.eta.systemizer.GoogleAppSystemizerInstaller
 import io.github.mangi.eta.systemizer.RootManager
 import io.github.mangi.eta.systemizer.SystemizerInstallResult
 import io.github.mangi.eta.ui.app.EnhancementSettingsHistory
 import io.github.mangi.eta.ui.app.rememberDeviceCapabilities
-import io.github.mangi.eta.ui.app.rememberExecutionNotificationRequest
 import io.github.mangi.eta.ui.components.EtaArrowPreference
 import io.github.mangi.eta.ui.components.EtaDropdownPreference
+import io.github.mangi.eta.ui.components.EtaPreference
 import io.github.mangi.eta.ui.components.EtaPreferenceColors
 import io.github.mangi.eta.ui.components.EtaPreferenceDivider
 import io.github.mangi.eta.ui.components.EtaPreferenceGroup
 import io.github.mangi.eta.ui.components.EtaPreferenceGroupTitle
 import io.github.mangi.eta.ui.components.EtaPreferenceIcon
 import io.github.mangi.eta.ui.components.EtaSwitchPreference
-import io.github.mangi.eta.ui.components.EtaTextButton
 import io.github.mangi.eta.ui.components.EtaWindowDialog
 import io.github.mangi.eta.ui.components.LanguagePreference
 import io.github.mangi.eta.ui.components.MiuixDialogActions
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
 import io.github.mangi.eta.ui.navigation.AppRoute
-import java.util.Calendar
-import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.DropdownItem
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -140,13 +120,6 @@ private fun SettingsPageContent(
     var hasUsedSystemizer by remember { mutableStateOf(enhancementHistory.hasUsedSystemizer) }
     var showSystemizerDialog by remember { mutableStateOf(false) }
     var installingSystemizer by remember { mutableStateOf(false) }
-    var showScheduleDialog by remember { mutableStateOf(false) }
-    var editingScheduleTask by remember { mutableStateOf<EtaScheduleStore.Task?>(null) }
-    var scheduleTimeInput by remember { mutableStateOf("") }
-    var schedulePromptInput by remember { mutableStateOf("") }
-    var scheduleDialogError by remember { mutableStateOf<String?>(null) }
-    var scheduleTasks by remember { mutableStateOf(EtaScheduleStore.load(context.applicationContext)) }
-    var exactAlarmAllowed by remember { mutableStateOf(canScheduleExactAlarms(context)) }
 
     // 悬浮窗权限状态：授权后从系统设置返回时（ON_RESUME）刷新。
     var overlayGranted by remember {
@@ -167,6 +140,42 @@ private fun SettingsPageContent(
             Toast.makeText(context, context.getString(R.string.settings_open_assistant_failed), Toast.LENGTH_SHORT).show()
         }
     }
+
+    // 关于组：版本信息与更新检查。结果对话框在列表外渲染，状态需要页面级 owner。
+    val appPackageInfo = remember {
+        context.packageManager.getPackageInfo(context.packageName, 0)
+    }
+    val appVersionName = appPackageInfo.versionName.orEmpty()
+    val appVersionSummary = "${appPackageInfo.versionName} (${appPackageInfo.longVersionCode})"
+    val openUrl: (String) -> Unit = { url ->
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<AppLatestRelease?>(null) }
+    val checkForUpdate: () -> Unit = {
+        if (!checkingUpdate) {
+            checkingUpdate = true
+            coroutineScope.launch {
+                val release = runCatching {
+                    withContext(Dispatchers.IO) { AppUpdateChecker.fetchLatest() }
+                }.getOrNull()
+                checkingUpdate = false
+                when {
+                    release == null -> Toast.makeText(
+                        context.applicationContext,
+                        context.getString(R.string.ui_update_check_failed),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    AppUpdateChecker.isNewer(release.version, appVersionName) -> availableUpdate = release
+                    else -> Toast.makeText(
+                        context.applicationContext,
+                        context.getString(R.string.ui_update_already_latest),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -175,95 +184,10 @@ private fun SettingsPageContent(
                 accessibilityGranted = isAgentAccessibilityEnabled(context)
                 accessibilityProtectionEnabled =
                     AccessibilityProtectionClient.isEnabled(context)
-                exactAlarmAllowed = canScheduleExactAlarms(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    val requestExecutionNotifications = rememberExecutionNotificationRequest()
-
-    fun openScheduleEditor(task: EtaScheduleStore.Task?) {
-        editingScheduleTask = task
-        scheduleTimeInput = task?.let { "%02d:%02d".format(it.hour, it.minute) } ?: ""
-        schedulePromptInput = task?.prompt ?: ""
-        scheduleDialogError = null
-        showScheduleDialog = true
-    }
-
-    fun commitScheduleTask() {
-        val parsed = parseScheduleTime(scheduleTimeInput)
-        if (parsed == null) {
-            scheduleDialogError = context.getString(R.string.schedule_invalid)
-            return
-        }
-        val prompt = schedulePromptInput.trim().take(EtaScheduleStore.MAX_PROMPT_CHARS)
-        if (prompt.isEmpty()) {
-            scheduleDialogError = context.getString(R.string.schedule_prompt_required)
-            return
-        }
-        val current = EtaScheduleStore.load(context.applicationContext)
-        val editing = editingScheduleTask
-        val updated = if (editing == null) {
-            if (current.size >= EtaScheduleStore.MAX_TASKS) {
-                scheduleDialogError = context.getString(R.string.schedule_max_reached)
-                return
-            }
-            current + EtaScheduleStore.Task(
-                id = UUID.randomUUID().toString(),
-                hour = parsed.first,
-                minute = parsed.second,
-                prompt = prompt,
-            )
-        } else {
-            current.map { task ->
-                if (task.id == editing.id) {
-                    task.copy(hour = parsed.first, minute = parsed.second, prompt = prompt)
-                } else {
-                    task
-                }
-            }
-        }
-        EtaScheduleStore.save(context.applicationContext, updated)
-        EtaScheduleScheduler.sync(context.applicationContext)
-        scheduleTasks = updated
-        showScheduleDialog = false
-        requestExecutionNotifications()
-        val target = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, parsed.first)
-            set(Calendar.MINUTE, parsed.second)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-            if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
-        }
-        val nextLabel = "%02d-%02d %02d:%02d".format(
-            target.get(Calendar.MONTH) + 1,
-            target.get(Calendar.DAY_OF_MONTH),
-            parsed.first,
-            parsed.second,
-        )
-        Toast.makeText(
-            context.applicationContext,
-            context.getString(R.string.schedule_saved, nextLabel),
-            Toast.LENGTH_SHORT,
-        ).show()
-    }
-
-    fun toggleScheduleTask(task: EtaScheduleStore.Task) {
-        val updated = EtaScheduleStore.load(context.applicationContext).map { item ->
-            if (item.id == task.id) item.copy(enabled = !item.enabled) else item
-        }
-        EtaScheduleStore.save(context.applicationContext, updated)
-        EtaScheduleScheduler.sync(context.applicationContext)
-        scheduleTasks = updated
-    }
-
-    fun deleteScheduleTask(task: EtaScheduleStore.Task) {
-        val updated = EtaScheduleStore.load(context.applicationContext).filterNot { it.id == task.id }
-        EtaScheduleStore.save(context.applicationContext, updated)
-        EtaScheduleScheduler.cancel(context.applicationContext, task)
-        scheduleTasks = updated
     }
 
     // Provider / Model 选中状态展示
@@ -286,27 +210,6 @@ private fun SettingsPageContent(
     // LSPosed 数据库）；未就绪时保持 null，UI 禁止修改。
     var prefs by remember { mutableStateOf(Prefs.remotePreferencesForUi(EtaApp.serviceInstance)) }
     val agentPrefs = remember { Prefs.localAgentPreferences() }
-    // 本地开关（不依赖 LSPosed）：语音唤醒启停；配送提醒重排闹钟并在开启时请求通知权限。
-    DisposableEffect(agentPrefs) {
-        val targetPrefs = agentPrefs ?: return@DisposableEffect onDispose {}
-        val listener = SharedPreferences.OnSharedPreferenceChangeListener { changedPrefs, key ->
-            if (key == Prefs.Keys.ETA_HOTWORD_ENABLED) {
-                if (changedPrefs.getBoolean(key, false)) {
-                    EtaHotwordService.start(context.applicationContext)
-                } else {
-                    EtaHotwordService.stop(context.applicationContext)
-                }
-            }
-            if (key == Prefs.Keys.ETA_REMINDER_KAIGONG || key == Prefs.Keys.ETA_REMINDER_WINDOW) {
-                if (changedPrefs.getBoolean(key, false)) {
-                    requestExecutionNotifications()
-                }
-                EtaReminderScheduler.sync(context.applicationContext)
-            }
-        }
-        targetPrefs.registerOnSharedPreferenceChangeListener(listener)
-        onDispose { targetPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
-    }
     var powerAssistantTarget by remember(prefs) {
         mutableStateOf(prefs?.let(Prefs::powerAssistantTarget) ?: enhancementHistory.powerTarget())
     }
@@ -357,7 +260,7 @@ private fun SettingsPageContent(
                         summary = providerSummary,
                         startAction = {
                             EtaPreferenceIcon(
-                                icon = Icons.Rounded.Memory,
+                                icon = Icons.Rounded.Cloud,
                                 tint = EtaPreferenceColors.Blue,
                             )
                         },
@@ -380,6 +283,16 @@ private fun SettingsPageContent(
             item(key = "section_context_extensions") {
                 EtaPreferenceGroupTitle(stringResource(R.string.settings_context_extensions))
                 EtaPreferenceGroup {
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.settings_auto_compaction),
+                        key = Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED,
+                        icon = Icons.Rounded.Layers,
+                        iconTint = EtaPreferenceColors.Blue,
+                    )
+
+                    EtaPreferenceDivider()
                     EtaArrowPreference(
                         title = stringResource(R.string.ui_memory_b55ff5),
                         startAction = {
@@ -396,7 +309,7 @@ private fun SettingsPageContent(
                         title = stringResource(R.string.route_skills),
                         startAction = {
                             EtaPreferenceIcon(
-                                icon = Icons.Rounded.Extension,
+                                icon = Icons.Rounded.ImportContacts,
                                 tint = EtaPreferenceColors.Green,
                             )
                         },
@@ -420,24 +333,11 @@ private fun SettingsPageContent(
                         title = "角色",
                         startAction = {
                             EtaPreferenceIcon(
-                                icon = Icons.Rounded.TheaterComedy,
+                                icon = Icons.Rounded.SportsBar,
                                 tint = EtaPreferenceColors.Orange,
                             )
                         },
                         onClick = { onNavigate(AppRoute.Characters) },
-                    )
-
-                    EtaPreferenceDivider()
-                    EtaArrowPreference(
-                        title = "扩展设置",
-                        summary = "特权通道 / 录屏 / 更新 / 外部通道 / 工作流 / 插件包 / 用量 / 工具权限 / 限流 / 多 Key / 功能模型槽位",
-                        startAction = {
-                            EtaPreferenceIcon(
-                                icon = Icons.Rounded.Tune,
-                                tint = EtaPreferenceColors.Blue,
-                            )
-                        },
-                        onClick = { onNavigate(AppRoute.AgentExtSettings) },
                     )
                 }
             }
@@ -470,16 +370,6 @@ private fun SettingsPageContent(
                         key = Prefs.Keys.AGENT_DEVICE_DIRECT_TOOLS,
                         icon = Icons.Rounded.Smartphone,
                         iconTint = EtaPreferenceColors.Green,
-                    )
-
-                    EtaPreferenceDivider()
-                    SwitchPref(
-                        context = context,
-                        prefs = agentPrefs,
-                        title = stringResource(R.string.ui_enable_shadow_display_tools_7c41af),
-                        key = Prefs.Keys.AGENT_SHADOW_TOOLS,
-                        icon = Icons.Rounded.Layers,
-                        iconTint = EtaPreferenceColors.Blue,
                     )
 
                     EtaPreferenceDivider()
@@ -533,108 +423,6 @@ private fun SettingsPageContent(
                         startAction = { EtaPreferenceIcon(Icons.Rounded.Security, tint = EtaPreferenceColors.Blue) },
                         onClick = { onNavigate(AppRoute.SystemEnhance) },
                     )
-
-                    EtaPreferenceDivider()
-                    EtaArrowPreference(
-                        title = "开发工具箱",
-                        summary = "Logcat、数据库与性能概览",
-                        startAction = { EtaPreferenceIcon(Icons.Rounded.Build, tint = EtaPreferenceColors.Orange) },
-                        onClick = { onNavigate(AppRoute.DevTools) },
-                    )
-                }
-            }
-
-            // ── 配送提醒（浙食链）──────────────────────────────
-            item(key = "zsl_reminders") {
-                EtaPreferenceGroupTitle(stringResource(R.string.settings_reminder_section))
-                EtaPreferenceGroup {
-                    SwitchPref(
-                        context = context,
-                        prefs = agentPrefs,
-                        title = stringResource(R.string.settings_reminder_kaigong_title),
-                        summary = stringResource(R.string.settings_reminder_kaigong_summary),
-                        key = Prefs.Keys.ETA_REMINDER_KAIGONG,
-                        icon = Icons.Rounded.NotificationsActive,
-                        iconTint = EtaPreferenceColors.Orange,
-                    )
-                    EtaPreferenceDivider()
-                    SwitchPref(
-                        context = context,
-                        prefs = agentPrefs,
-                        title = stringResource(R.string.settings_reminder_window_title),
-                        summary = stringResource(R.string.settings_reminder_window_summary),
-                        key = Prefs.Keys.ETA_REMINDER_WINDOW,
-                        icon = Icons.Rounded.Schedule,
-                        iconTint = EtaPreferenceColors.Blue,
-                    )
-                }
-            }
-
-            // ── 定时任务（到点自动执行） ──────────────────────────────
-            item(key = "schedule_tasks") {
-                EtaPreferenceGroupTitle(stringResource(R.string.schedule_section_title))
-                EtaPreferenceGroup {
-                    scheduleTasks.forEach { task ->
-                        val timeLabel = "%02d:%02d".format(task.hour, task.minute)
-                        val preview = task.prompt.lineSequence().first().take(24)
-                        EtaArrowPreference(
-                            title = if (task.enabled) "$timeLabel · $preview" else timeLabel + " · " + stringResource(R.string.schedule_paused_prefix) + preview,
-                            summary = task.prompt.lineSequence().first().take(60),
-                            startAction = {
-                                EtaPreferenceIcon(
-                                    icon = Icons.Rounded.Schedule,
-                                    tint = if (task.enabled) EtaPreferenceColors.Green else EtaPreferenceColors.Blue,
-                                )
-                            },
-                            endActions = {
-                                IconButton(
-                                    onClick = { toggleScheduleTask(task) },
-                                    minWidth = 36.dp,
-                                    minHeight = 36.dp,
-                                ) {
-                                    Icon(
-                                        imageVector = if (task.enabled) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                        contentDescription = null,
-                                        tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                                    )
-                                }
-                                IconButton(
-                                    onClick = { deleteScheduleTask(task) },
-                                    minWidth = 36.dp,
-                                    minHeight = 36.dp,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Delete,
-                                        contentDescription = null,
-                                        tint = MiuixTheme.colorScheme.error,
-                                    )
-                                }
-                            },
-                            onClick = { openScheduleEditor(task) },
-                        )
-                        EtaPreferenceDivider()
-                    }
-                    EtaArrowPreference(
-                        title = stringResource(R.string.schedule_add),
-                        startAction = { EtaPreferenceIcon(Icons.Rounded.Add, tint = EtaPreferenceColors.Blue) },
-                        onClick = { openScheduleEditor(null) },
-                    )
-                    if (!exactAlarmAllowed) {
-                        EtaPreferenceDivider()
-                        EtaArrowPreference(
-                            title = stringResource(R.string.schedule_exact_title),
-                            summary = stringResource(R.string.schedule_exact_summary),
-                            startAction = { EtaPreferenceIcon(Icons.Rounded.Schedule, tint = EtaPreferenceColors.Orange) },
-                            onClick = {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                    )
-                                }
-                            },
-                        )
-                    }
                 }
             }
 
@@ -651,36 +439,6 @@ private fun SettingsPageContent(
                             )
                         },
                         onClick = openAssistantSettings,
-                    )
-                    EtaPreferenceDivider()
-                    SwitchPref(
-                        context = context,
-                        prefs = agentPrefs,
-                        title = stringResource(R.string.settings_hotword_title),
-                        summary = stringResource(R.string.settings_hotword_summary),
-                        key = Prefs.Keys.ETA_HOTWORD_ENABLED,
-                        icon = Icons.Rounded.Mic,
-                        iconTint = EtaPreferenceColors.Blue,
-                    )
-                    EtaPreferenceDivider()
-                    SwitchPref(
-                        context = context,
-                        prefs = agentPrefs,
-                        title = stringResource(R.string.settings_voice_continuous_title),
-                        summary = stringResource(R.string.settings_voice_continuous_summary),
-                        key = Prefs.Keys.ETA_VOICE_CONTINUOUS,
-                        icon = Icons.Rounded.Sync,
-                        iconTint = EtaPreferenceColors.Green,
-                    )
-                    EtaPreferenceDivider()
-                    SwitchPref(
-                        context = context,
-                        prefs = agentPrefs,
-                        title = stringResource(R.string.settings_tts_title),
-                        summary = stringResource(R.string.settings_tts_summary),
-                        key = Prefs.Keys.ETA_TTS_ENABLED,
-                        icon = Icons.AutoMirrored.Rounded.VolumeUp,
-                        iconTint = EtaPreferenceColors.Orange,
                     )
                     if (prefs != null || hasConnectedFramework) {
                         EtaPreferenceDivider()
@@ -741,7 +499,7 @@ private fun SettingsPageContent(
                             prefs = prefs,
                             title = stringResource(R.string.ui_enable_vendor_assistant_custom_models_c8e465),
                             key = Prefs.Keys.AGENT_CUSTOM_MODEL,
-                            icon = Icons.Rounded.Memory,
+                            icon = Icons.Rounded.Cloud,
                             iconTint = EtaPreferenceColors.Blue,
                         )
 
@@ -751,7 +509,7 @@ private fun SettingsPageContent(
                             prefs = prefs,
                             title = stringResource(R.string.ui_only_take_over_with_agent_prefix_d17556),
                             key = Prefs.Keys.AGENT_REQUIRE_PREFIX,
-                            icon = Icons.Rounded.Code,
+                            icon = Icons.Rounded.FilterAlt,
                             iconTint = EtaPreferenceColors.Blue,
                         )
                     }
@@ -789,7 +547,7 @@ private fun SettingsPageContent(
                                 prefs = prefs,
                                 title = stringResource(R.string.ui_bright_screen_evokes_automatic_voice_input_4358fe),
                                 key = Prefs.Keys.SCREEN_ON_VOICE_COMMAND,
-                                icon = Icons.Rounded.Mic,
+                                icon = Icons.Rounded.SettingsVoice,
                                 iconTint = EtaPreferenceColors.Green,
                             )
 
@@ -958,7 +716,7 @@ private fun SettingsPageContent(
                             }
                         },
                     )
-                    if (prefs != null || hasConnectedFramework) {
+                    if (AccessibilityProtectionClient.isSupported() && (prefs != null || hasConnectedFramework)) {
                         EtaPreferenceDivider()
                         EtaSwitchPreference(
                             title = stringResource(R.string.ui_enforce_accessibility_55e838),
@@ -1008,88 +766,61 @@ private fun SettingsPageContent(
             item(key = "section_about") {
                 EtaPreferenceGroupTitle(stringResource(R.string.ui_about_bed172))
                 EtaPreferenceGroup {
+                    EtaPreference(
+                        title = stringResource(R.string.ui_about_version_title),
+                        summary = appVersionSummary,
+                        startAction = {
+                            EtaPreferenceIcon(
+                                icon = Icons.Rounded.Info,
+                                tint = EtaPreferenceColors.Blue,
+                            )
+                        },
+                    )
+
+                    EtaPreferenceDivider()
                     EtaArrowPreference(
-                        title = stringResource(R.string.ui_source_code_740296),
+                        title = stringResource(R.string.ui_about_update_title),
+                        summary = if (checkingUpdate) {
+                            stringResource(R.string.ui_about_update_checking)
+                        } else {
+                            null
+                        },
+                        startAction = {
+                            EtaPreferenceIcon(
+                                icon = Icons.Rounded.SystemUpdate,
+                                tint = EtaPreferenceColors.Green,
+                                enabled = !checkingUpdate,
+                            )
+                        },
+                        enabled = !checkingUpdate,
+                        onClick = checkForUpdate,
+                    )
+
+                    EtaPreferenceDivider()
+                    EtaArrowPreference(
+                        title = stringResource(R.string.ui_about_feedback_title),
+                        startAction = {
+                            EtaPreferenceIcon(
+                                icon = Icons.Rounded.BugReport,
+                                tint = EtaPreferenceColors.Orange,
+                            )
+                        },
+                        onClick = { openUrl("https://github.com/Mangi-11/Eta/issues") },
+                    )
+
+                    EtaPreferenceDivider()
+                    EtaArrowPreference(
+                        title = stringResource(R.string.ui_about_github_star_title),
+                        summary = stringResource(R.string.ui_about_github_star_hint),
                         startAction = {
                             EtaPreferenceIcon(
                                 icon = Icons.Rounded.Code,
                                 tint = EtaPreferenceColors.Blue,
                             )
                         },
-                        endActions = {
-                            Text(
-                                text = "GitHub",
-                                fontSize = MiuixTheme.textStyles.body2.fontSize,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                            )
-                        },
-                        onClick = {
-                            val intent = android.content.Intent(
-                                android.content.Intent.ACTION_VIEW,
-                                android.net.Uri.parse("https://github.com/Mangi-11/Eta"),
-                            )
-                            context.startActivity(intent)
-                        },
+                        onClick = { openUrl("https://github.com/Mangi-11/Eta") },
                     )
                 }
-            }
-        }
-
-        EtaWindowDialog(
-            show = showScheduleDialog,
-            title = stringResource(
-                if (editingScheduleTask == null) R.string.schedule_add else R.string.schedule_edit_title,
-            ),
-            onDismissRequest = { showScheduleDialog = false },
-        ) {
-            Column {
-                TextField(
-                    value = scheduleTimeInput,
-                    onValueChange = { scheduleTimeInput = it },
-                    label = stringResource(R.string.schedule_time_hint),
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                TextField(
-                    value = schedulePromptInput,
-                    onValueChange = { schedulePromptInput = it.take(EtaScheduleStore.MAX_PROMPT_CHARS) },
-                    label = stringResource(R.string.schedule_prompt_hint),
-                    useLabelAsPlaceholder = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                scheduleDialogError?.let { message ->
-                    Text(
-                        text = message,
-                        color = MiuixTheme.colorScheme.error,
-                        fontSize = MiuixTheme.textStyles.body2.fontSize,
-                    )
-                }
-                if (editingScheduleTask != null) {
-                    EtaTextButton(
-                        text = stringResource(R.string.schedule_try_run),
-                        onClick = {
-                            val task = editingScheduleTask
-                            if (task != null) {
-                                requestExecutionNotifications()
-                                EtaScheduleService.start(context.applicationContext, task, userInitiated = true)
-                                Toast.makeText(
-                                    context.applicationContext,
-                                    context.getString(R.string.schedule_try_started),
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                            showScheduleDialog = false
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                MiuixDialogActions(
-                    confirmText = stringResource(R.string.action_save),
-                    onCancel = { showScheduleDialog = false },
-                    onConfirm = { commitScheduleTask() },
-                )
             }
         }
 
@@ -1125,6 +856,24 @@ private fun SettingsPageContent(
                 }
             },
         )
+
+        availableUpdate?.let { update ->
+            EtaWindowDialog(
+                show = true,
+                title = stringResource(R.string.ui_update_available_title),
+                summary = stringResource(R.string.ui_update_available_message, update.version, appVersionName),
+                onDismissRequest = { availableUpdate = null },
+            ) {
+                MiuixDialogActions(
+                    confirmText = stringResource(R.string.ui_update_go_download),
+                    onCancel = { availableUpdate = null },
+                    onConfirm = {
+                        availableUpdate = null
+                        openUrl(update.url)
+                    },
+                )
+            }
+        }
 }
 
 // ── 系统化确认对话框 ─────────────────────────────────────────────────────────
@@ -1155,14 +904,6 @@ private fun SystemizerConfirmDialog(
         )
     }
 }
-
-private fun parseScheduleTime(value: String): Pair<Int, Int>? {
-    val match = Regex("^([01]?\\d|2[0-3]):([0-5]?\\d)$").find(value.trim()) ?: return null
-    return match.groupValues[1].toInt() to match.groupValues[2].toInt()
-}
-
-private fun canScheduleExactAlarms(context: Context): Boolean =
-    context.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() ?: false
 
 // ── 带图标的布尔开关 ─────────────────────────────────────────────────────────
 

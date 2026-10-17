@@ -58,7 +58,7 @@ internal class AgentModelRetry(
                 if (callbackFailed || Thread.currentThread().isInterrupted) throw failure
                 val classified = AgentModelFailure.transport(failure) ?: throw failure
                 if (hostedToolStarted) throw AgentModelFailure(
-                    classified.code, false, classified.message.orEmpty(), classified, recoveryAllowed = false,
+                    classified.code, false, classified.message.orEmpty(), classified,
                 )
                 if (!classified.retryable) throw classified
                 if (retries == MAX_RETRIES) {

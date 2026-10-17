@@ -15,6 +15,7 @@ import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.Rect
 import android.graphics.RectF
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
@@ -28,6 +29,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import io.github.mangi.eta.agent.device.ScrollAxis
 import io.github.mangi.eta.agent.device.ScrollAxisContract
+import io.github.mangi.eta.agent.device.ScrollAmount
 import io.github.mangi.eta.agent.device.ScrollDirection
 import io.github.mangi.eta.agent.device.ScrollEvidence
 import io.github.mangi.eta.agent.device.ScrollEvidenceContract
@@ -138,26 +140,8 @@ class AgentAccessibilityService : AccessibilityService() {
      * 避免其他运行或 wait_for_text 的临时观察改写 index 含义。
      */
     fun captureNodeSnapshot(maxNodes: Int): NodeSnapshot? = runOnMainSync {
-        val root = rootInActiveWindow ?: return@runOnMainSync null
-        buildSnapshot(root, maxNodes)
-    }
-
-    /**
-     * 指定显示（如影子屏虚拟屏）上的窗口树快照。
-     *
-     * 不依赖 UiAutomation——那是全设备**独占**资源，被别的自动化占住就无法使用；
-     * 无障碍服务按 displayId 从所有显示的窗口里直接取，与其它自动化互不影响。
-     */
-    fun captureNodeSnapshotForDisplay(displayId: Int, maxNodes: Int): NodeSnapshot? = runOnMainSync {
-        val candidate = runCatching {
-            windowsOnAllDisplays?.get(displayId).orEmpty().firstOrNull { window -> window.root != null }
-        }.getOrNull() ?: return@runOnMainSync null
-        val root = candidate.root ?: return@runOnMainSync null
-        buildSnapshot(root, maxNodes)
-    }
-
-    private fun buildSnapshot(root: AccessibilityNodeInfo, maxNodes: Int): NodeSnapshot {
         val startedAt = SystemClock.elapsedRealtime()
+        val root = rootInActiveWindow ?: return@runOnMainSync null
         val nodeLimit = maxNodes.coerceIn(1, 120)
         val indexedNodes = mutableListOf<IndexedNode>()
         val traversal = NodeTraversalState(
@@ -171,7 +155,7 @@ class AgentAccessibilityService : AccessibilityService() {
             depth = 0,
             traversal = traversal,
         )
-        return NodeSnapshot(
+        NodeSnapshot(
             id = "o${SNAPSHOT_IDS.incrementAndGet()}",
             serviceToken = serviceToken,
             packageName = root.packageName?.toString().orEmpty(),
@@ -280,7 +264,6 @@ class AgentAccessibilityService : AccessibilityService() {
         windowChangeLock.lock()
         try {
             windowChanged.signalAll()
-            signalTreeMirror()
         } finally {
             windowChangeLock.unlock()
         }
@@ -369,74 +352,6 @@ class AgentAccessibilityService : AccessibilityService() {
     private fun bumpWindowContentGeneration(windowId: Int) {
         if (windowId < 0) return
         windowContentGenerations[windowId] = windowContentGeneration(windowId) + 1L
-        signalTreeMirror()
-    }
-
-    // ── 树镜像（毫秒级识屏）────────────────────────────────
-    // 内容代每次界面变化 +1；镜像按代缓存节点列表（不变就不重新走树），
-    // 同时用同一个信号唤醒“等待界面变化”的调用者，不再轮询。
-    private val treeMirrorLock = ReentrantLock()
-    private val treeMirrorChanged = treeMirrorLock.newCondition()
-
-    @Volatile
-    private var treeMirrorGeneration: Long = 0L
-
-    private var treeMirrorNodes: List<UiNode> = emptyList()
-    private var treeMirrorCachedGeneration: Long = -1L
-
-    /** 当前内容代（每次影响节点树的窗口事件都会 +1）。 */
-    fun treeGeneration(): Long = treeMirrorGeneration
-
-    /** 界面有任何变化时唤醒所有等待者。 */
-    private fun signalTreeMirror() {
-        treeMirrorLock.lock()
-        try {
-            treeMirrorGeneration += 1L
-            treeMirrorChanged.signalAll()
-        } finally {
-            treeMirrorLock.unlock()
-        }
-    }
-
-    /**
-     * 事件驱动的“等界面变化”：界面一变立即返回，否则最多等 [timeoutMs]。
-     * 供 wait_for_text 这类等待使用，替代 350ms 轮询。
-     */
-    fun awaitTreeChange(timeoutMs: Long) {
-        if (timeoutMs <= 0) return
-        treeMirrorLock.lock()
-        try {
-            treeMirrorChanged.await(timeoutMs.coerceAtMost(AWAIT_TREE_CHANGE_MAX_MS), TimeUnit.MILLISECONDS)
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-        } finally {
-            treeMirrorLock.unlock()
-        }
-    }
-
-    /**
-     * 毫秒级读节点列表：内容代未变直接给缓存（不走树）；变了才重建一次。
-     */
-    fun mirrorNodes(maxNodes: Int): List<UiNode> {
-        val limit = maxNodes.coerceIn(1, 120)
-        val generation = treeMirrorGeneration
-        treeMirrorLock.lock()
-        try {
-            if (treeMirrorCachedGeneration == generation && treeMirrorNodes.isNotEmpty()) {
-                return if (treeMirrorNodes.size <= limit) treeMirrorNodes else treeMirrorNodes.take(limit)
-            }
-        } finally {
-            treeMirrorLock.unlock()
-        }
-        val fresh = captureNodeSnapshot(limit)?.nodes.orEmpty()
-        treeMirrorLock.lock()
-        try {
-            treeMirrorNodes = fresh
-            treeMirrorCachedGeneration = generation
-        } finally {
-            treeMirrorLock.unlock()
-        }
-        return fresh
     }
 
     private fun windowContentGeneration(windowId: Int): Long =
@@ -556,6 +471,7 @@ class AgentAccessibilityService : AccessibilityService() {
         snapshot: NodeSnapshot,
         index: Int,
         direction: ScrollDirection,
+        amount: ScrollAmount = ScrollAmount.PAGE,
     ): ScrollActionResult {
         val validation = runOnMainSync { validateNode(snapshot, index) }
             ?: return ScrollActionResult.failure(
@@ -588,10 +504,10 @@ class AgentAccessibilityService : AccessibilityService() {
             message = "指定节点及其父节点不可滚动",
             targetIndex = index,
         )
-        return executeScroll(scrollable, direction, targetIndex = index)
+        return executeScroll(scrollable, direction, targetIndex = index, amount = amount)
     }
 
-    internal fun scrollCurrent(direction: ScrollDirection): ScrollActionResult {
+    internal fun scrollCurrent(direction: ScrollDirection, amount: ScrollAmount = ScrollAmount.PAGE): ScrollActionResult {
         val target = runOnMainSync {
             rootInActiveWindow?.let { root -> findBestScrollableNode(root, direction) }
         } ?: return ScrollActionResult.failure(
@@ -599,13 +515,14 @@ class AgentAccessibilityService : AccessibilityService() {
             code = "NO_ACTIVE_WINDOW",
             message = "当前活动窗口不可访问",
         )
-        return executeScroll(target, direction, targetIndex = null)
+        return executeScroll(target, direction, targetIndex = null, amount = amount)
     }
 
     private fun executeScroll(
         target: AccessibilityNodeInfo,
         direction: ScrollDirection,
         targetIndex: Int?,
+        amount: ScrollAmount,
     ): ScrollActionResult = scrollActionLock.withLock {
         val startedAt = SystemClock.elapsedRealtime()
         val refreshed = runOnMainSync { target.refresh() } == true
@@ -631,7 +548,8 @@ class AgentAccessibilityService : AccessibilityService() {
         val beforeAnchors = scrollContentAnchors(target)
         val targetIdentity = ScrollTargetIdentity.from(target)
         val beforeSequence = currentScrollEventSequence()
-        val method = chooseScrollMethod(target, direction)
+        // 节点滚动动作固定翻约一屏；小幅滚动只能用手势控制位移。
+        val method = if (amount == ScrollAmount.PAGE) chooseScrollMethod(target, direction) else null
         var methodName = method?.name.orEmpty()
         return withScrollEventObservation(packageName, windowId) {
             val nodeDispatch = method?.let { selected ->
@@ -662,7 +580,7 @@ class AgentAccessibilityService : AccessibilityService() {
                     )
                 }
                 val bounds = clippedNodeBounds(target)
-                val gesture = direction.gestureWithin(bounds)
+                val gesture = direction.gestureWithin(bounds, amount)
                     ?: return ScrollActionResult.failure(
                         direction = direction,
                         code = "INVALID_NODE_BOUNDS",
@@ -820,7 +738,7 @@ class AgentAccessibilityService : AccessibilityService() {
             return@runNodeActionOnMainSync error
         }
         val plan = TextEditPlanner.insertAtSelection(
-            currentText = node.text?.toString().orEmpty(),
+            currentText = node.realText(),
             insertedText = text,
             selectionStart = node.textSelectionStart,
             selectionEnd = node.textSelectionEnd,
@@ -868,7 +786,7 @@ class AgentAccessibilityService : AccessibilityService() {
             return@runNodeActionOnMainSync error
         }
         val plan = TextEditPlanner.insertAtSelection(
-            currentText = node.text?.toString().orEmpty(),
+            currentText = node.realText(),
             insertedText = text,
             selectionStart = node.textSelectionStart,
             selectionEnd = node.textSelectionEnd,
@@ -903,7 +821,7 @@ class AgentAccessibilityService : AccessibilityService() {
         val pasteResult = try {
             if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
                 val verified = runCatching { node.refresh() }.getOrDefault(false) &&
-                    node.text?.toString() == plan.text
+                    node.realText() == plan.text
                 if (verified) {
                     NodeActionResult.success(method = "ACTION_PASTE", verified = true)
                 } else {
@@ -1043,6 +961,10 @@ class AgentAccessibilityService : AccessibilityService() {
             if (windowsSubmitted.compareAndSet(false, true)) {
                 runCatching { onWindowsSubmitted?.invoke() }
             }
+        }
+        // 旧系统没有逐窗口截图，不能用全屏截图绕过入口包与 Eta 浮层排除合同。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            return ScreenshotCaptureResult.unavailable().also { signalWindowsSubmitted() }
         }
         if (Looper.myLooper() == Looper.getMainLooper()) {
             return ScreenshotCaptureResult.unavailable().also { signalWindowsSubmitted() }
@@ -1210,32 +1132,14 @@ class AgentAccessibilityService : AccessibilityService() {
         }
         val failureCodes = synchronized(lock) { failures.toMap() }
         val complete = completed && missingIds.isEmpty() && merged != null
-        // 「抓到了窗口但内容是黑的」多发生在切屏动画/首帧未渲染等瞬间；标出来，让上层决定重试。
-        val blankWindowIds = if (merged == null) {
-            emptyList()
-        } else {
-            captured
-                .filterValues { (bitmap, _) -> !bitmap.isRecycled && bitmap.isMostlyBlack() }
-                .keys
-                .toList()
-        }
-        val blankCritical = blankWindowIds.any(criticalWindowIds::contains)
         AndroidAgentLogger.debug {
             "Agent accessibility action=capture_screenshot outcome=merged " +
                 "allWindows=${allWindows.size} validWindows=${captureWindows.size} " +
                 "excludedPackages=${excludedPackages.size} " +
                 "completed=$completed screenshots=${captured.size} " +
                 "complete=$complete criticalMissing=$criticalWindowMissing " +
-                "blank=${blankWindowIds.size} blankCritical=$blankCritical " +
                 "screen=${screenW}x${screenH} merged=${merged?.width}x${merged?.height} " +
                 "elapsed_ms=${SystemClock.elapsedRealtime() - startedAt}"
-        }
-        if (blankCritical) {
-            AndroidAgentLogger.warn(
-                "Agent accessibility action=capture_screenshot outcome=blank_critical " +
-                    "blankWindows=${blankWindowIds.size} criticalWindows=${criticalWindowIds.size} " +
-                    "complete=$complete elapsed_ms=${SystemClock.elapsedRealtime() - startedAt}"
-            )
         }
         captured.values.forEach { (bitmap, _) ->
             if (!bitmap.isRecycled) bitmap.recycle()
@@ -1250,8 +1154,6 @@ class AgentAccessibilityService : AccessibilityService() {
             failureCodes = failureCodes,
             timedOut = !completed,
             criticalWindowMissing = criticalWindowMissing,
-            blankWindowIds = blankWindowIds,
-            blankCritical = blankCritical,
         )
     }
 
@@ -1309,29 +1211,12 @@ class AgentAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** 采样判断窗口位图是否几乎全黑：「抓到了但没画面」的黑帧。 */
-    private fun Bitmap.isMostlyBlack(): Boolean {
-        if (width <= 0 || height <= 0) return false
-        val stepX = (width / BLACK_FRAME_SAMPLE_SIDE).coerceAtLeast(1)
-        val stepY = (height / BLACK_FRAME_SAMPLE_SIDE).coerceAtLeast(1)
-        var bright = 0
-        var total = 0
-        var y = 0
-        while (y < height) {
-            var x = 0
-            while (x < width) {
-                val color = getPixel(x, y)
-                val luma = (((color shr 16) and 0xFF) * 299 +
-                    ((color shr 8) and 0xFF) * 587 +
-                    (color and 0xFF) * 114) / 1000
-                if (luma > BLACK_FRAME_LUMA) bright++
-                total++
-                x += stepX
-            }
-            y += stepY
-        }
-        return total > 0 && bright * 200 <= total
-    }
+    /**
+     * 输入框的真实内容。空框显示提示文字时 text 返回的是提示语，若当作已有内容，
+     * 追加输入会把提示拼进结果，清空后读回校验也会误报失败。
+     */
+    private fun AccessibilityNodeInfo.realText(): String =
+        if (isShowingHintText) "" else text?.toString().orEmpty()
 
     private fun setNodeText(
         node: AccessibilityNodeInfo,
@@ -1350,7 +1235,7 @@ class AgentAccessibilityService : AccessibilityService() {
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, safeCursor)
         }
         val refreshed = runCatching { node.refresh() }.getOrDefault(false)
-        if (!node.isPassword && (!refreshed || node.text?.toString() != text)) {
+        if (!node.isPassword && (!refreshed || node.realText() != text)) {
             return NodeActionResult.outcomeUnknown()
         }
         val selectionRestored = refreshed && node.performAction(
@@ -1469,7 +1354,8 @@ class AgentAccessibilityService : AccessibilityService() {
                 AccessibilityNodeInfo.ACTION_SCROLL_FORWARD in actions ||
                     AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD in actions
                 ) -> 2
-            AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_IN_DIRECTION.id in actions -> 1
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+                AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_IN_DIRECTION.id in actions -> 1
             else -> 0
         }
     }
@@ -1535,15 +1421,17 @@ class AgentAccessibilityService : AccessibilityService() {
                 )
             }
         }
-        val inDirection = AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_IN_DIRECTION.id
-        if (inDirection in actionIds) {
-            val args = Bundle().apply {
-                putInt(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_DIRECTION_INT,
-                    direction.focusDirection(),
-                )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val inDirection = AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_IN_DIRECTION.id
+            if (inDirection in actionIds) {
+                val args = Bundle().apply {
+                    putInt(
+                        AccessibilityNodeInfo.ACTION_ARGUMENT_DIRECTION_INT,
+                        direction.focusDirection(),
+                    )
+                }
+                return ScrollMethod(inDirection, "ACTION_SCROLL_IN_DIRECTION", args)
             }
-            return ScrollMethod(inDirection, "ACTION_SCROLL_IN_DIRECTION", args)
         }
         return null
     }
@@ -1799,7 +1687,8 @@ class AgentAccessibilityService : AccessibilityService() {
             if (depth > 0 && !visible) return
 
             val bounds = node.bounds()
-            val text = node.text?.toString().orEmpty().take(120)
+            val text = node.realText().take(120)
+            val hint = node.hintText?.toString().orEmpty().take(60)
             val desc = node.contentDescription?.toString().orEmpty().take(120)
             val clickable = node.isClickable
             val longClickable = node.isLongClickable
@@ -1850,6 +1739,9 @@ class AgentAccessibilityService : AccessibilityService() {
                     editable = editable,
                     password = password,
                     enabled = enabled,
+                    checked = node.isCheckable.takeIf { it }?.let { node.isChecked },
+                    selected = node.isSelected,
+                    hint = hint,
                     clickTarget = clickTarget,
                     longClickTarget = longClickTarget,
                     scrollTarget = scrollTarget,
@@ -2092,10 +1984,6 @@ class AgentAccessibilityService : AccessibilityService() {
         val failureCodes: Map<Int, Int>,
         val timedOut: Boolean,
         val criticalWindowMissing: Boolean,
-        /** 抓到了但内容几乎全黑的窗口 id（切屏动画/首帧未渲染等黑帧）。 */
-        val blankWindowIds: List<Int> = emptyList(),
-        /** 关键窗口（顶层应用/活动/焦点）抓到黑帧：本帧不可信，调用方应重试。 */
-        val blankCritical: Boolean = false,
     ) {
         val partial: Boolean get() = bitmap != null && !complete
 
@@ -2236,7 +2124,12 @@ class AgentAccessibilityService : AccessibilityService() {
         val focused: Boolean,
         val editable: Boolean,
         val password: Boolean,
-        val enabled: Boolean
+        val enabled: Boolean,
+        /** 开关、勾选框等的状态；null 表示节点不可勾选。 */
+        val checked: Boolean? = null,
+        val selected: Boolean = false,
+        /** 输入框提示语，只在内容为空时有意义，用于识别"这是哪个输入框"。 */
+        val hint: String = "",
     )
 
     internal data class IndexedNode(
@@ -2257,6 +2150,9 @@ class AgentAccessibilityService : AccessibilityService() {
         val editable: Boolean,
         val password: Boolean,
         val enabled: Boolean,
+        val checked: Boolean?,
+        val selected: Boolean,
+        val hint: String,
         val clickTarget: NodeActionTarget?,
         val longClickTarget: NodeActionTarget?,
         val scrollTarget: NodeActionTarget?,
@@ -2292,7 +2188,7 @@ class AgentAccessibilityService : AccessibilityService() {
                 packageName = packageName?.toString().orEmpty(),
                 className = className?.toString().orEmpty(),
                 viewId = viewIdResourceName.orEmpty(),
-                text = text?.toString().orEmpty().take(120),
+                text = (if (isShowingHintText) "" else text?.toString().orEmpty()).take(120),
                 description = contentDescription?.toString().orEmpty().take(120),
                 password = isPassword,
             )
@@ -2312,7 +2208,10 @@ class AgentAccessibilityService : AccessibilityService() {
                 focused = focused,
                 editable = editable,
                 password = password,
-                enabled = enabled
+                enabled = enabled,
+                checked = checked,
+                selected = selected,
+                hint = hint,
             )
     }
 
@@ -2433,12 +2332,7 @@ class AgentAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val CLIP_LABEL = "eta_agent"
-        /** 黑帧判定：采样 64×64 网格，亮度高于阈值的采样占比 ≤0.5% 视为「没画面」。 */
-        private const val BLACK_FRAME_SAMPLE_SIDE = 64
-        private const val BLACK_FRAME_LUMA = 24
         private const val WINDOW_POLL_FALLBACK_MS = 80L
-        /** 事件驱动等待的上限（每次唤醒后调用方会重新检查，超出则重新等）。 */
-        private const val AWAIT_TREE_CHANGE_MAX_MS = 500L
         private const val MAX_UI_TREE_DEPTH = 24
         private const val UI_TREE_VISIT_MULTIPLIER = 8
         private const val MIN_UI_TREE_VISITED_NODES = 128
@@ -2480,12 +2374,17 @@ class AgentAccessibilityService : AccessibilityService() {
             AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.id,
             AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD.id,
             AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD.id,
-            AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_IN_DIRECTION.id,
             AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_UP.id,
             AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_DOWN.id,
             AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_LEFT.id,
             AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_RIGHT.id,
-        )
+        ).let { actions ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                actions + AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_IN_DIRECTION.id
+            } else {
+                actions
+            }
+        }
         private val VERTICAL_DIRECTION_ACTION_IDS = setOf(
             AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id,
             AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id,

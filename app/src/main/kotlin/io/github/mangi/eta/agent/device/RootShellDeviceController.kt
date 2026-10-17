@@ -8,14 +8,10 @@ import io.github.mangi.eta.core.AgentLogger
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Rect
-import android.os.Looper
+import android.os.Build
 import android.os.SystemClock
 import java.io.IOException
-import java.io.BufferedReader
-import java.io.OutputStream
 import java.io.StringReader
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -24,13 +20,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
-
-/** 黑帧重截前的等待（毫秒）：等切屏动画/首帧渲染结束。 */
-private const val BLANK_FRAME_RETRY_DELAY_MS = 300L
-/** observe 截图路径的黑帧重试次数（交互路径，只重一次）。 */
-private const val SCREENSHOT_BLANK_RETRIES = 1
-/** OCR 截图路径的黑帧/部分截取重试次数（离线识别多试一次更划算）。 */
-private const val OCR_CAPTURE_RETRIES = 2
 
 internal class RootShellDeviceController(
     private val logger: AgentLogger,
@@ -99,16 +88,14 @@ internal class RootShellDeviceController(
         val focused: Boolean,
         val editable: Boolean,
         val password: Boolean,
-        val enabled: Boolean
+        val enabled: Boolean,
+        val checked: Boolean? = null,
+        val selected: Boolean = false,
+        val hint: String = "",
     ) {
         val centerX: Int get() = bounds.centerX()
         val centerY: Int get() = bounds.centerY()
     }
-
-    private val rootShellLock = Any()
-    private var rootShellProcess: Process? = null
-    private var rootShellStdin: OutputStream? = null
-    private var rootShellReader: BufferedReader? = null
 
     fun observe(includeScreenshot: Boolean, includeUiTree: Boolean, maxNodes: Int): Observation {
         val accessibility = AgentAccessibilityService.current()
@@ -158,14 +145,6 @@ internal class RootShellDeviceController(
         } else {
             null
         }
-        // 沉淀应用 UI 文档（异步）：供模型一次写出多步 flow，而不是每步都重新观察
-        elementObservation?.let { observation ->
-            AppUiDocument.record(
-                context = AgentAccessibilityService.current(),
-                packageName = observation.packageName,
-                nodes = observation.nodes,
-            )
-        }
         val nodes = elementObservation?.nodes.orEmpty()
         val capture = if (includeScreenshot) captureScreenshot() else ScreenCapture.notRequested()
         val image = capture.image
@@ -191,7 +170,7 @@ internal class RootShellDeviceController(
                     .put(
                         "note",
                         if (accessibility != null) {
-                            "节点来自无障碍服务，支持 tap_element、replace_text、clear_text、scroll_element 等稳定节点动作"
+                            "节点来自无障碍服务，支持 tap_element、type_text、scroll_element 等稳定节点动作"
                         } else {
                             "无障碍服务未启用，节点来自 uiautomator；坐标工具会回退到 Root Shell"
                         }
@@ -201,11 +180,10 @@ internal class RootShellDeviceController(
                 "coordinate_contract",
                 if (coordinateSpace == null) {
                     JSONObject()
-                        .put("default_coordinate_space", "screen")
-                        .put("note", "未附加截图，坐标工具使用真实设备屏幕坐标")
+                        .put("note", "坐标工具必须显式填写 coordinate_space：ui_nodes 的 center/bounds 用 screen；本次未附图")
                 } else {
                     JSONObject()
-                        .put("default_coordinate_space", "screenshot")
+                        .put("recommended_coordinate_space", "normalized")
                         .put(
                             "screenshot",
                             JSONObject()
@@ -224,7 +202,10 @@ internal class RootShellDeviceController(
                                 .put("x", coordinateSpace.screenWidth.toDouble() / coordinateSpace.screenshotWidth)
                                 .put("y", coordinateSpace.screenHeight.toDouble() / coordinateSpace.screenshotHeight)
                         )
-                        .put("note", "tap、tap_area、long_press、swipe 默认接收截图像素坐标；ui_nodes.center 是 screen 坐标")
+                        .put(
+                            "note",
+                            "看截图定位用 normalized（0–999，相对整屏），不受模型侧图片缩放影响；ui_nodes 的 center/bounds 用 screen",
+                        )
                 }
             )
             .put("focus", focus)
@@ -250,63 +231,67 @@ internal class RootShellDeviceController(
         return Observation(json.toString(), image, elementObservation, coordinateSpace)
     }
 
-    fun tap(x: Int, y: Int, durationMs: Long = 50): String {
+    fun tap(x: Int, y: Int): String {
+        if (AgentAccessibilityService.current() == null && !rootAvailable()) return accessibilityUnavailable()
         validatePoint(x, y)
-        // 有 root 时优先走 shell input 命令：最稳，不依赖无障碍服务是否连接。
-        if (rootAvailable()) {
-            return inputCommand("input tap $x $y", "tap")
+        AgentAccessibilityService.current()?.let { service ->
+            val result = service.gestureTap(x.toFloat(), y.toFloat())
+            if (result.ok) {
+                waitForUiSettle("tap")
+                return nodeActionJson("tap", result)
+            }
+            if (!GestureFallbackPolicy.mayFallbackToRoot(result.code)) {
+                return nodeActionJson("tap", result)
+            }
+            if (!rootAvailable()) return nodeActionJson("tap", result)
         }
-        if (AgentAccessibilityService.current() == null) return accessibilityUnavailable()
-        val service = AgentAccessibilityService.current()!!
-        val result = service.gestureTap(x.toFloat(), y.toFloat(), durationMs)
-        return if (result.ok) {
-            waitForUiSettle("tap")
-            nodeActionJson("tap", result)
-        } else {
-            nodeActionJson("tap", result)
-        }
+        return inputCommand("input tap $x $y", "tap")
     }
 
     fun longPress(x: Int, y: Int, durationMs: Int): String {
+        if (AgentAccessibilityService.current() == null && !rootAvailable()) return accessibilityUnavailable()
         validatePoint(x, y)
         val duration = durationMs.coerceIn(300, 3_000)
-        if (rootAvailable()) {
-            return inputCommand("input swipe $x $y $x $y $duration", "long_press")
+        AgentAccessibilityService.current()?.let { service ->
+            val result = service.gestureTap(x.toFloat(), y.toFloat(), duration.toLong())
+            if (result.ok) {
+                waitForUiSettle("long_press")
+                return nodeActionJson("long_press", result.copy(method = "GESTURE_LONG_PRESS"))
+            }
+            if (!GestureFallbackPolicy.mayFallbackToRoot(result.code)) {
+                return nodeActionJson("long_press", result)
+            }
+            if (!rootAvailable()) return nodeActionJson("long_press", result)
         }
-        if (AgentAccessibilityService.current() == null) return accessibilityUnavailable()
-        val result = AgentAccessibilityService.current()!!.gestureTap(x.toFloat(), y.toFloat(), duration.toLong())
-        return if (result.ok) {
-            waitForUiSettle("long_press")
-            nodeActionJson("long_press", result.copy(method = "GESTURE_LONG_PRESS"))
-        } else {
-            nodeActionJson("long_press", result)
-        }
+        return inputCommand("input swipe $x $y $x $y $duration", "long_press")
     }
 
     fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): String {
+        if (AgentAccessibilityService.current() == null && !rootAvailable()) return accessibilityUnavailable()
         validatePoint(x1, y1)
         validatePoint(x2, y2)
         val duration = durationMs.coerceIn(100, 2_000)
-        if (rootAvailable()) {
-            return inputCommand("input swipe $x1 $y1 $x2 $y2 $duration", "swipe")
+        AgentAccessibilityService.current()?.let { service ->
+            val result = service.gestureSwipe(
+                x1.toFloat(),
+                y1.toFloat(),
+                x2.toFloat(),
+                y2.toFloat(),
+                duration.toLong(),
+            )
+            if (result.ok) {
+                waitForUiSettle("swipe")
+                return nodeActionJson("swipe", result)
+            }
+            if (!GestureFallbackPolicy.mayFallbackToRoot(result.code)) {
+                return nodeActionJson("swipe", result)
+            }
+            if (!rootAvailable()) return nodeActionJson("swipe", result)
         }
-        if (AgentAccessibilityService.current() == null) return accessibilityUnavailable()
-        val result = AgentAccessibilityService.current()!!.gestureSwipe(
-            x1.toFloat(),
-            y1.toFloat(),
-            x2.toFloat(),
-            y2.toFloat(),
-            duration.toLong(),
-        )
-        return if (result.ok) {
-            waitForUiSettle("swipe")
-            nodeActionJson("swipe", result)
-        } else {
-            nodeActionJson("swipe", result)
-        }
+        return inputCommand("input swipe $x1 $y1 $x2 $y2 $duration", "swipe")
     }
 
-    fun scroll(direction: String): String {
+    fun scroll(direction: String, amount: String = ""): String {
         val parsed = ScrollDirection.parse(direction)
             ?: return scrollErrorJson(
                 "scroll",
@@ -314,8 +299,10 @@ internal class RootShellDeviceController(
                 "INVALID_ARGUMENT",
                 "direction 仅支持 up/down/left/right",
             )
+        val parsedAmount = ScrollAmount.parse(amount)
+            ?: return scrollErrorJson("scroll", parsed, "INVALID_ARGUMENT", "amount 仅支持 small/page")
         AgentAccessibilityService.current()?.let { service ->
-            return scrollActionJson("scroll", service.scrollCurrent(parsed))
+            return scrollActionJson("scroll", service.scrollCurrent(parsed, parsedAmount))
         }
         if (!rootAvailable()) return accessibilityUnavailable()
         val beforeNodes = dumpUiNodes(120)
@@ -332,6 +319,7 @@ internal class RootShellDeviceController(
             beforeNodes = beforeNodes,
             maxNodes = 120,
             targetIndex = null,
+            amount = parsedAmount,
         )
     }
 
@@ -426,6 +414,7 @@ internal class RootShellDeviceController(
         observation: ElementObservation,
         index: Int,
         direction: String,
+        amount: String = "",
     ): String {
         val parsed = ScrollDirection.parse(direction)
             ?: return scrollErrorJson(
@@ -434,6 +423,8 @@ internal class RootShellDeviceController(
                 "INVALID_ARGUMENT",
                 "direction 仅支持 up/down/left/right",
             )
+        val parsedAmount = ScrollAmount.parse(amount)
+            ?: return scrollErrorJson("scroll_element", parsed, "INVALID_ARGUMENT", "amount 仅支持 small/page")
         val snapshot = observation.accessibilitySnapshot
         if (snapshot != null) {
             val service = AgentAccessibilityService.current()
@@ -445,7 +436,7 @@ internal class RootShellDeviceController(
                 )
             return scrollActionJson(
                 tool = "scroll_element",
-                result = service.scrollNode(snapshot, index, parsed),
+                result = service.scrollNode(snapshot, index, parsed, parsedAmount),
             )
         }
         if (!rootAvailable()) return rootRequired()
@@ -472,6 +463,7 @@ internal class RootShellDeviceController(
             beforeNodes = resolved.currentNodes,
             maxNodes = observation.maxNodes,
             targetIndex = index,
+            amount = parsedAmount,
         )
     }
 
@@ -543,16 +535,14 @@ internal class RootShellDeviceController(
         val needle = text.trim()
         if (needle.isBlank()) return errorJson("INVALID_ARGUMENT", "text 不能为空")
         val timeout = timeoutMs.coerceIn(500, 60_000)
-        val startedAt = android.os.SystemClock.elapsedRealtime()
         val deadline = System.currentTimeMillis() + timeout
         var attempts = 0
         while (System.currentTimeMillis() <= deadline) {
             attempts++
             val service = AgentAccessibilityService.current()
             if (service == null && !rootAvailable()) return accessibilityUnavailable()
-            // mirrorNodes：内容代未变时直接读缓存（毫秒级），变了才重建
             val nodes = service
-                ?.mirrorNodes(120)
+                ?.queryNodes(120)
                 ?.map { it.toUiNode() }
                 ?.takeIf { it.isNotEmpty() }
                 ?: if (rootAvailable()) dumpUiNodes(120) else emptyList()
@@ -568,15 +558,11 @@ internal class RootShellDeviceController(
                     .put("ok", true)
                     .put("tool", "wait_for_text")
                     .put("attempts", attempts)
-                    .put("elapsed_ms", android.os.SystemClock.elapsedRealtime() - startedAt)
                     .put("matched_node", matchedNode)
                     .put("note", "等待查询不会发布元素快照；如需节点动作，请重新调用 observe_screen")
                     .toString()
             }
-            // 事件驱动：界面一变立即醒；没变就等到剩余时间（单次上限 500ms，醒来后重新检查）
-            val remaining = deadline - System.currentTimeMillis()
-            if (remaining <= 0) break
-            if (service != null) service.awaitTreeChange(remaining) else Thread.sleep(350)
+            Thread.sleep(350)
         }
         return JSONObject()
             .put("ok", false)
@@ -584,7 +570,6 @@ internal class RootShellDeviceController(
             .put("code", "TIMEOUT")
             .put("message", "等待文本超时：$needle")
             .put("attempts", attempts)
-            .put("elapsed_ms", android.os.SystemClock.elapsedRealtime() - startedAt)
             .toString()
     }
 
@@ -730,55 +715,18 @@ internal class RootShellDeviceController(
         return inputCommand(command, "open_system_panel")
     }
 
-    /** 排除项为空且 root 可用时才允许整屏截图兜底（否则宁可无图，也不把 Eta 自己的浮窗拍给模型）。 */
-    private fun canFallbackToRoot(excludedPackages: Set<String>): Boolean =
-        rootAvailable() && ScreenshotOutcomePolicy.mayFallbackToRoot(
-            excludedPackagesPresent = excludedPackages.isNotEmpty(),
-            criticalWindowMissing = false,
-        )
-
-    /** 黑帧重截前的等待：主线程上不等待，避免卡 UI。 */
-    private fun sleepForBlankRetry() {
-        if (Looper.myLooper() != Looper.getMainLooper()) {
-            runCatching { Thread.sleep(BLANK_FRAME_RETRY_DELAY_MS) }
-        }
-    }
-
     private fun captureScreenshot(): ScreenCapture {
         val excludedPackages = screenshotExcludedPackages()
-        // 优先用无障碍截图：takeScreenshotOfWindow 逐窗口过滤 TYPE_ACCESSIBILITY_OVERLAY，
-        // 天然排除浮层（glow/orb/bubble 等），对 Agent 透明
+        // Android 14 起优先逐窗口截图，排除 Eta 浮层；旧系统只保留满足排除合同的 Root 回退。
         val service = AgentAccessibilityService.current()
-        if (service != null) {
+        val windowScreenshotSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+        if (service != null && windowScreenshotSupported) {
             val captureStartedAt = SystemClock.elapsedRealtime()
-            var result = runCatching {
+            val result = runCatching {
                 service.captureScreenshotExcludingOverlays(excludedPackages)
             }.getOrNull()
-            // 黑帧（关键窗口抓到但没画面）重截通常就恢复；仍黑且允许 root 时改用整屏截图兜底。
-            var blankRetries = 0
-            while (result?.blankCritical == true && blankRetries < SCREENSHOT_BLANK_RETRIES) {
-                blankRetries++
-                logger.warn(
-                    "Agent device action=capture_screenshot outcome=blank_retry " +
-                        "attempt=$blankRetries source=accessibility"
-                )
-                result.bitmap?.recycle()
-                sleepForBlankRetry()
-                result = runCatching {
-                    service.captureScreenshotExcludingOverlays(excludedPackages)
-                }.getOrNull()
-            }
-            if (result?.blankCritical == true && canFallbackToRoot(excludedPackages)) {
-                logger.warn(
-                    "Agent device action=capture_screenshot outcome=blank_after_retries " +
-                        "fallback=root source=accessibility"
-                )
-                result.bitmap?.recycle()
-                result = null
-            }
-            val capture = result
-            val bitmap = capture?.bitmap
-            if (capture != null && bitmap != null) {
+            val bitmap = result?.bitmap
+            if (bitmap != null) {
                 val capturedAt = SystemClock.elapsedRealtime()
                 val image = try {
                     runCatching {
@@ -804,43 +752,53 @@ internal class RootShellDeviceController(
                     return ScreenCapture(
                         image = image,
                         source = "accessibility",
-                        complete = capture.complete,
-                        partial = capture.partial,
-                        expectedWindows = capture.expectedWindows,
-                        capturedWindows = capture.capturedWindows,
-                        missingWindowIds = capture.missingWindowIds,
-                        failureCodes = capture.failureCodes,
-                        timedOut = capture.timedOut,
-                        criticalWindowMissing = capture.criticalWindowMissing,
-                        blank = capture.blankCritical,
+                        complete = result.complete,
+                        partial = result.partial,
+                        expectedWindows = result.expectedWindows,
+                        capturedWindows = result.capturedWindows,
+                        missingWindowIds = result.missingWindowIds,
+                        failureCodes = result.failureCodes,
+                        timedOut = result.timedOut,
+                        criticalWindowMissing = result.criticalWindowMissing,
                     )
                 }
             }
-            if (capture?.criticalWindowMissing == true) {
+            if (result?.criticalWindowMissing == true) {
                 logger.warn(
                     "Agent device action=capture_screenshot outcome=failed " +
-                        "reason=critical_window_missing failures=${capture.failureCodes.size}"
+                        "reason=critical_window_missing failures=${result.failureCodes.size}"
                 )
                 return ScreenCapture(
                     image = null,
                     source = "accessibility",
                     complete = false,
                     partial = false,
-                    expectedWindows = capture.expectedWindows,
-                    capturedWindows = capture.capturedWindows,
-                    missingWindowIds = capture.missingWindowIds,
-                    failureCodes = capture.failureCodes,
-                    timedOut = capture.timedOut,
+                    expectedWindows = result.expectedWindows,
+                    capturedWindows = result.capturedWindows,
+                    missingWindowIds = result.missingWindowIds,
+                    failureCodes = result.failureCodes,
+                    timedOut = result.timedOut,
                     criticalWindowMissing = true,
                 )
             }
         }
-        if (!canFallbackToRoot(excludedPackages)) {
-            logger.warn(
-                "Agent device action=capture_screenshot outcome=failed " +
-                    "reason=package_exclusion_unavailable excludedPackages=${excludedPackages.size}"
+        if (
+            !rootAvailable() ||
+            !ScreenshotOutcomePolicy.mayFallbackToRoot(
+                excludedPackagesPresent = excludedPackages.isNotEmpty(),
+                criticalWindowMissing = false,
             )
-            return ScreenCapture.failed(source = "accessibility")
+        ) {
+            val code = if (!windowScreenshotSupported) {
+                "WINDOW_SCREENSHOT_UNSUPPORTED"
+            } else {
+                "SCREENSHOT_UNAVAILABLE"
+            }
+            logger.debug {
+                "Agent device action=capture_screenshot outcome=unavailable " +
+                    "code=$code excludedPackages=${excludedPackages.size}"
+            }
+            return ScreenCapture.failed(source = "accessibility", code = code)
         }
         logger.debug {
             "Agent device action=capture_screenshot outcome=fallback source=root"
@@ -876,102 +834,6 @@ internal class RootShellDeviceController(
             partial = false,
             expectedWindows = 1,
             capturedWindows = 1,
-        )
-    }
-
-    /** OCR 截图结果：位图 + 采集完整性/黑帧诊断，供调用方判断「偶发大段漏识别」。 */
-    data class OcrCapture(
-        val bitmap: Bitmap,
-        val source: String,
-        val complete: Boolean,
-        val expectedWindows: Int,
-        val capturedWindows: Int,
-        val timedOut: Boolean,
-        /** 关键窗口抓到黑帧（重试后仍黑时为 true）。 */
-        val blank: Boolean = false,
-        /** 黑帧/部分截取触发过的重截次数。 */
-        val blankRetries: Int = 0,
-    )
-
-    /**
-     * OCR 专用：截取原始位图（优先无障碍、其次 root），调用方负责回收。
-     * 部分截取（个别窗口失败/超时）或黑帧（关键窗口抓到但没画面）都会让识别大段缺失；
-     * 这里延时重截，仍黑且允许 root 时改用整屏截图兜底。
-     */
-    fun captureBitmapForOcr(): OcrCapture? {
-        val excludedPackages = screenshotExcludedPackages()
-        val service = AgentAccessibilityService.current()
-        if (service != null) {
-            var capture = runCatching {
-                service.captureScreenshotExcludingOverlays(excludedPackages)
-            }.getOrNull()
-            var retries = 0
-            while (retries < OCR_CAPTURE_RETRIES) {
-                val current = capture ?: break
-                if (current.bitmap == null) break
-                if (current.complete && !current.blankCritical) break
-                retries++
-                logger.warn(
-                    "Agent ocr capture retry: attempt=$retries blank=${current.blankCritical} " +
-                        "complete=${current.complete} windows=${current.capturedWindows}/${current.expectedWindows}"
-                )
-                sleepForBlankRetry()
-                val next = runCatching {
-                    service.captureScreenshotExcludingOverlays(excludedPackages)
-                }.getOrNull()
-                if (next?.bitmap == null) break
-                current.bitmap.recycle()
-                capture = next
-            }
-            val finalCapture = capture
-            val bitmap = finalCapture?.bitmap
-            if (finalCapture != null && bitmap != null) {
-                if (!finalCapture.blankCritical || !canFallbackToRoot(excludedPackages)) {
-                    return OcrCapture(
-                        bitmap = bitmap,
-                        source = "accessibility",
-                        complete = finalCapture.complete,
-                        expectedWindows = finalCapture.expectedWindows,
-                        capturedWindows = finalCapture.capturedWindows,
-                        timedOut = finalCapture.timedOut,
-                        blank = finalCapture.blankCritical,
-                        blankRetries = retries,
-                    )
-                }
-                logger.warn("Agent ocr capture blank after retries; fallback to root screencap")
-                val rootCapture = captureRootOcr()
-                if (rootCapture != null) {
-                    bitmap.recycle()
-                    return rootCapture.copy(blankRetries = retries)
-                }
-                return OcrCapture(
-                    bitmap = bitmap,
-                    source = "accessibility",
-                    complete = finalCapture.complete,
-                    expectedWindows = finalCapture.expectedWindows,
-                    capturedWindows = finalCapture.capturedWindows,
-                    timedOut = finalCapture.timedOut,
-                    blank = true,
-                    blankRetries = retries,
-                )
-            }
-        }
-        if (!canFallbackToRoot(excludedPackages)) return null
-        return captureRootOcr()
-    }
-
-    /** root 兜底：整屏 screencap（会把 Eta 自身浮层拍进去，仅排除项为空且 root 可用时允许）。 */
-    private fun captureRootOcr(): OcrCapture? {
-        val result = runSuBytes("screencap -p", timeoutSeconds = 8)
-        if (result.exitCode != 0 || result.output.isEmpty()) return null
-        val bitmap = BitmapFactory.decodeByteArray(result.output, 0, result.output.size) ?: return null
-        return OcrCapture(
-            bitmap = bitmap,
-            source = "root",
-            complete = true,
-            expectedWindows = 1,
-            capturedWindows = 1,
-            timedOut = false,
         )
     }
 
@@ -1023,7 +885,10 @@ internal class RootShellDeviceController(
                             focused = focused,
                             editable = parser.attr("class").contains("EditText", ignoreCase = true),
                             password = parser.attr("password").toBoolean(),
-                            enabled = enabled
+                            enabled = enabled,
+                            checked = parser.attr("checked").toBoolean()
+                                .takeIf { parser.attr("checkable").toBoolean() },
+                            selected = parser.attr("selected").toBoolean(),
                         )
                     }
                 }
@@ -1068,9 +933,10 @@ internal class RootShellDeviceController(
         beforeNodes: List<UiNode>,
         maxNodes: Int,
         targetIndex: Int?,
+        amount: ScrollAmount = ScrollAmount.PAGE,
     ): String {
         val startedAt = SystemClock.elapsedRealtime()
-        val gesture = direction.gestureWithin(bounds)
+        val gesture = direction.gestureWithin(bounds, amount)
             ?: return scrollErrorJson(
                 tool,
                 direction,
@@ -1241,10 +1107,10 @@ internal class RootShellDeviceController(
 
     private fun waitForUiSettle(tool: String) {
         val delayMs = when (tool) {
-            "tap", "long_press", "press_key" -> 150L
-            "swipe" -> 350L
-            "input_text" -> 250L
-            else -> 150L
+            "tap", "long_press", "press_key" -> 350L
+            "swipe" -> 650L
+            "input_text" -> 500L
+            else -> 250L
         }
         Thread.sleep(delayMs)
     }
@@ -1278,6 +1144,11 @@ internal class RootShellDeviceController(
             .put("editable", editable)
             .put("password", password)
             .put("enabled", enabled)
+            .apply {
+                checked?.let { put("checked", it) }
+                if (selected) put("selected", true)
+                if (hint.isNotBlank()) put("hint", hint)
+            }
 
     private fun XmlPullParser.attr(name: String): String =
         getAttributeValue(null, name).orEmpty()
@@ -1292,70 +1163,8 @@ internal class RootShellDeviceController(
         )
     }
 
-    /** 复用持久 root shell 执行命令；失败/不可用时返回 null，由调用方回退到每次启动 su。 */
-    private fun runPersistent(command: String, timeoutSeconds: Long): ShellTextResult? = synchronized(rootShellLock) {
-        if (!ensureRootShell()) return null
-        val stdinStream = rootShellStdin ?: return null
-        val reader = rootShellReader ?: return null
-        val marker = "ETA_END_${System.nanoTime()}_${kotlin.random.Random.nextInt()}"
-        val script = command.trimEnd('\n') + "\necho \"$marker:$?\"\n"
-        try {
-            stdinStream.write(script.toByteArray(Charsets.UTF_8))
-            stdinStream.flush()
-        } catch (e: Exception) {
-            closeRootShell()
-            return null
-        }
-        val output = StringBuilder()
-        val deadline = System.currentTimeMillis() + timeoutSeconds * 1000
-        while (System.currentTimeMillis() < deadline) {
-            val line = try { reader.readLine() } catch (e: Exception) { null }
-            if (line == null) {
-                closeRootShell()
-                return null
-            }
-            if (line.startsWith(marker)) {
-                val exitCode = line.substringAfter("$marker:").toIntOrNull() ?: 0
-                return ShellTextResult(exitCode, output.toString().trimEnd())
-            }
-            output.append(line).append('\n')
-        }
-        closeRootShell()
-        null
-    }
-
-    private fun ensureRootShell(): Boolean {
-        if (rootShellProcess?.isAlive == true && rootShellStdin != null && rootShellReader != null) return true
-        closeRootShell()
-        return runCatching {
-            val process = ProcessBuilder(RootSuResolver.command(), "-c", "sh").redirectErrorStream(true).start()
-            rootShellProcess = process
-            rootShellStdin = process.outputStream
-            rootShellReader = process.inputStream.bufferedReader(Charsets.UTF_8)
-            true
-        }.getOrElse {
-            closeRootShell()
-            false
-        }
-    }
-
-    private fun closeRootShell() {
-        runCatching { rootShellStdin?.close() }
-        runCatching { rootShellReader?.close() }
-        runCatching { rootShellProcess?.destroy() }
-        rootShellProcess = null
-        rootShellStdin = null
-        rootShellReader = null
-    }
-
-    fun close() {
-        synchronized(rootShellLock) { closeRootShell() }
-    }
-
     private fun runSuText(command: String, timeoutSeconds: Long): ShellTextResult {
         if (!rootAvailable()) return ShellTextResult(-1, "ROOT_REQUIRED")
-        val persistent = runPersistent(command, timeoutSeconds)
-        if (persistent != null) return persistent
         val result = runRootProcess(command, timeoutSeconds)
         val output = listOf(result.output.decodeToString(), result.stderr.decodeToString())
             .filter(String::isNotBlank).joinToString("\n").trim()
@@ -1525,7 +1334,10 @@ internal class RootShellDeviceController(
             focused = focused,
             editable = editable,
             password = password,
-            enabled = enabled
+            enabled = enabled,
+            checked = checked,
+            selected = selected,
+            hint = hint,
         )
 
     private data class ShellTextResult(val exitCode: Int, val output: String)
@@ -1553,8 +1365,7 @@ internal class RootShellDeviceController(
         val timedOut: Boolean = false,
         val criticalWindowMissing: Boolean = false,
         val requested: Boolean = true,
-        /** 关键窗口为黑帧（重试与 root 兜底都没救回时为 true）。 */
-        val blank: Boolean = false,
+        val code: String? = null,
     ) {
         fun toJson(): JSONObject {
             val failures = JSONArray()
@@ -1584,7 +1395,7 @@ internal class RootShellDeviceController(
                 .put("failures", failures)
                 .put("timed_out", timedOut)
                 .put("critical_window_missing", criticalWindowMissing)
-                .put("blank", blank)
+                .also { result -> code?.let { result.put("code", it) } }
         }
 
         companion object {
@@ -1598,13 +1409,14 @@ internal class RootShellDeviceController(
                 requested = false,
             )
 
-            fun failed(source: String): ScreenCapture = ScreenCapture(
+            fun failed(source: String, code: String? = null): ScreenCapture = ScreenCapture(
                 image = null,
                 source = source,
                 complete = false,
                 partial = false,
                 expectedWindows = 0,
                 capturedWindows = 0,
+                code = code,
             )
         }
     }

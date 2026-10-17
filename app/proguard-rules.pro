@@ -68,3 +68,8 @@
 # Porcupine 通过 JNI/反射加载 native 与接口，R8 无法静态识别引用。
 -keep class ai.picovoice.** { *; }
 -dontwarn ai.picovoice.**
+
+# app_process 通过固定类名启动受控的一方应用操作入口。
+-keep class io.github.mangi.eta.agent.phone.PhoneCommandMain {
+    public static void main(java.lang.String[]);
+}

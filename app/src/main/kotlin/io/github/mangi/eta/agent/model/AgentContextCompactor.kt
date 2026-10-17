@@ -15,45 +15,6 @@ internal class AgentContextCompactor(
         messages: JSONArray,
         systemCount: Int,
         sensitiveIds: Set<String>,
-        force: Boolean = false,
-    ): JSONArray {
-        val running = java.util.concurrent.atomic.AtomicBoolean(true)
-        val watchdog = startDeadlineWatchdog(running)
-        try {
-            return compactInternal(messages, systemCount, sensitiveIds, force)
-        } finally {
-            running.set(false)
-            watchdog.interrupt()
-        }
-    }
-
-    /**
-     * 摘要是一次网络请求，OkHttp 的 readTimeout 只防“完全没有数据”的静止，服务端边聊边发心跳
-     * 时它永不触发；所以给压缩加一道总时限兜底。超时只掐断在途请求（不取消整个 run），
-     * 让压缩走正常失败分支：界面得到明确失败文案，且本轮回答仍能交付。
-     * 周期触发是为了覆盖模型客户端的自动重试（重试会重新发起请求，可能再次卡住）。
-     */
-    private fun startDeadlineWatchdog(running: java.util.concurrent.atomic.AtomicBoolean): Thread =
-        Thread {
-            while (running.get()) {
-                try {
-                    Thread.sleep(COMPACTION_DEADLINE_MS)
-                } catch (_: InterruptedException) {
-                    return@Thread
-                }
-                if (running.get()) controller.abortInFlightRequests()
-            }
-        }.apply {
-            isDaemon = true
-            name = "eta-compaction-deadline"
-            start()
-        }
-
-    private fun compactInternal(
-        messages: JSONArray,
-        systemCount: Int,
-        sensitiveIds: Set<String>,
-        force: Boolean = false,
     ): JSONArray {
         controller.throwIfCancelled()
         if (AnthropicEphemeralState.hasPendingToolResponse(messages)) {
@@ -64,29 +25,10 @@ internal class AgentContextCompactor(
             it.optString("role") == "user" && !it.has("_eta_observation")
         }
         // 最新用户请求及其后尚在进行的工具链必须可以继续；长任务允许压缩该请求之后的已完成批次。
-        val safeEnds = (1..history.size).filter { canSplit(history, it) }
-        val recentLimit = config.contextWindow?.takeIf { it > 0 }?.let { (it * AgentContextBudget.RECENT_RATIO).toInt() }
-        val initialEnd = if (force) {
-            safeEnds.lastOrNull()
-        } else {
-            safeEnds.lastOrNull { it <= history.size - AgentContextBudget.RECENT_MESSAGES }
-                ?: safeEnds.firstOrNull()
-        }
-        if (initialEnd == null || initialEnd <= 0) throw failure("CONTEXT_NOT_COMPACTABLE", "没有可安全压缩的完整历史批次。")
-        var end: Int = initialEnd
-        if (recentLimit != null) {
-            while (AgentContextBudget.rawEstimate(JSONArray(history.drop(end))) > recentLimit) {
-                end = safeEnds.firstOrNull { it > end } ?: break
-            }
-        }
-        val firstUser = history.indexOfFirst {
-            it.optString("role") == "user" && !it.has("_eta_observation")
-        }
+        val end = (history.size downTo 1).firstOrNull { canSplit(history, it) }
+            ?: throw failure("CONTEXT_NOT_COMPACTABLE", "没有可安全压缩的完整历史批次。")
         val protectedUser = history.getOrNull(latestUser)?.takeIf { latestUser < end }
-        val protectedFirst = history.getOrNull(firstUser)?.takeIf {
-            firstUser >= 0 && firstUser < end && firstUser != latestUser
-        }
-        val source = JSONArray(history.take(end).filterNot { it === protectedUser || it === protectedFirst })
+        val source = JSONArray(history.take(end).filterNot { it === protectedUser })
         val durable = AgentConversationCodec.transcript(source, 0, sensitiveIds)
         if (durable.isEmpty()) throw failure("CONTEXT_NOT_COMPACTABLE", "没有可压缩的历史内容。")
         val safe = durable.map { message ->
@@ -101,7 +43,7 @@ internal class AgentContextCompactor(
             message.copy(content = text, contentJson = "", reasoningContent = "")
         }
         val summary = AgentContextSummarizer(config, provider, controller, roleplay)
-            .summarize(completeGroups(safe))
+            .summarize(safe)
         val covered = safe.sumOf { it.compactedUserTurns + if (it.role == "user") 1 else 0 }
         val result = JSONArray()
         for (index in 0 until systemCount) result.put(messages.getJSONObject(index))
@@ -112,7 +54,6 @@ internal class AgentContextCompactor(
             compactedUserTurns = covered,
             summaryThroughUserTurn = covered + if (protectedUser != null) 1 else 0,
         )))
-        protectedFirst?.let(result::put)
         protectedUser?.let(result::put)
         history.drop(end).forEach { message ->
             // 新摘要改变了前缀；旧 opaque items 不再代表同一份 Provider 上下文。
@@ -121,16 +62,13 @@ internal class AgentContextCompactor(
             } else message
             result.put(AnthropicEphemeralState.withoutContentBlocks(withoutResponsesItems))
         }
-        if (AgentContextBudget.rawEstimate(result) >= AgentContextBudget.rawEstimate(messages)) {
+        if (result.toString().length >= messages.toString().length) {
             throw failure("CONTEXT_NO_REDUCTION", "摘要未能缩小上下文，原始上下文已保留。")
         }
         return result
     }
 
     companion object {
-        /** 压缩总时限：兜底防止“正在压缩上下文”永不结束（见 startDeadlineWatchdog）。 */
-        private const val COMPACTION_DEADLINE_MS = 150_000L
-
         fun signedAnthropicToolRoundFailure() = failure(
             "ANTHROPIC_THINKING_CONTEXT_LOCKED",
             "当前 Anthropic 工具回合的思考签名绑定原始上下文，提交工具结果前无法压缩上下文。",
@@ -146,20 +84,6 @@ internal class AgentContextCompactor(
                 if (message.optString("role") == "tool") open.remove(message.optString("tool_call_id"))
             }
             return open.isEmpty()
-        }
-
-        private fun completeGroups(messages: List<AgentModelClient.ConversationMessage>): List<List<AgentModelClient.ConversationMessage>> {
-            val json = messages.map(AgentConversationCodec::toJsonObject)
-            val groups = mutableListOf<List<AgentModelClient.ConversationMessage>>()
-            var start = 0
-            for (end in 1..json.size) {
-                if (canSplit(json, end)) {
-                    groups += messages.subList(start, end)
-                    start = end
-                }
-            }
-            if (start < messages.size) groups += messages.subList(start, messages.size)
-            return groups
         }
 
         fun failure(code: String, message: String) = AgentModelFailure(code, false, message)

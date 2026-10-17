@@ -81,7 +81,7 @@ val hasReleaseSigning = listOf(
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -93,13 +93,13 @@ android {
     defaultConfig {
         applicationId = "io.github.mangi.eta"
         minSdk = 34
-        targetSdk = 36
+        targetSdk = 37
         ndk {
             abiFilters += "arm64-v8a"
         }
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        versionCode = 2026101201
-        versionName = "3.0.6"
+        versionCode = 2026101801
+        versionName = "3.3.1-local"
     }
 
     signingConfigs {
@@ -130,8 +130,9 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        isCoreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_25
+        targetCompatibility = JavaVersion.VERSION_25
     }
 
     buildFeatures {
@@ -169,6 +170,9 @@ android {
 }
 
 dependencies {
+    coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
+    implementation(libs.jsoup)
+    implementation(libs.intellij.markdown)
     implementation(libs.commons.compress)
     implementation(libs.xz)
     compileOnly(libs.libxposed.api)
@@ -185,10 +189,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.activity.compose)
-    implementation(libs.markdown.renderer)
-    implementation(libs.markdown.renderer.m3)
-    // markdown-renderer-m3 将 material3 作为 compileOnly，需显式引入以满足运行时依赖
-    implementation(libs.material3)
     implementation(libs.hidden.api.bypass)
 
     // Shizuku：免 Root 的 ADB/Root 特权通道（对齐 Operit 的 DEBUGGER 权限层级）
@@ -204,8 +204,6 @@ dependencies {
 
     // OkHttp：替代 HttpURLConnection，支持 SSE
     implementation(libs.okhttp)
-    implementation(libs.liquid)
-    implementation(libs.backdrop)
     implementation(libs.okhttp.sse)
 
     // Kotlinx Serialization：Provider 设置与运行时配置 JSON
