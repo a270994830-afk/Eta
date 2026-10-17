@@ -138,6 +138,8 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
     private var hiddenForForegroundOperation = false
     private var handoffInProgress by mutableStateOf(false)
     private var handoffExitRequested by mutableStateOf(false)
+    private var voiceSessionMode = false
+    private var pendingInitialQuery: String? = null
     private var inputText by mutableStateOf("")
     private var inputFocusRequestKey by mutableIntStateOf(-1)
     private var uiState by mutableStateOf(EtaVoiceUiState())
@@ -174,7 +176,11 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             AssistantSpeechForeground.ACTION_STOP -> { speechInput.cancel(); playback.stop() }
-            ACTION_SHOW -> showEntry(intent.getStringExtra(EXTRA_SCREEN_CONTEXT_ID))
+            ACTION_SHOW -> {
+                voiceSessionMode = intent.getBooleanExtra(EXTRA_VOICE_MODE, false)
+                pendingInitialQuery = intent.getStringExtra(EXTRA_INITIAL_QUERY)
+                showEntry(intent.getStringExtra(EXTRA_SCREEN_CONTEXT_ID))
+            }
             ACTION_HANDOFF_READY -> finishHandoff()
             else -> Unit
         }
@@ -229,6 +235,14 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
         showWindow()
         if (windowView == null) {
             stopSelf()
+            return
+        }
+        // 语音入口带入了要执行的文本（唤醒词/快捷指令/厂商助手话术）：直接提交，不再等聆听。
+        val initial = pendingInitialQuery?.takeIf { it.isNotBlank() }
+        pendingInitialQuery = null
+        if (initial != null) {
+            updateSoftInput(visible = false)
+            submitPrompt(initial)
             return
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -819,6 +833,8 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
         const val ACTION_OPEN_CONVERSATION = "io.github.mangi.eta.agent.voice.OPEN_CONVERSATION"
         const val EXTRA_CONVERSATION_KEY = "io.github.mangi.eta.agent.voice.extra.CONVERSATION_KEY"
         private const val EXTRA_SCREEN_CONTEXT_ID = "assistant_screen_context_id"
+        private const val EXTRA_VOICE_MODE = "io.github.mangi.eta.agent.voice.extra.VOICE_MODE"
+        private const val EXTRA_INITIAL_QUERY = "io.github.mangi.eta.agent.voice.extra.SPOKEN_QUERY"
         private const val ACTION_HANDOFF_READY = "io.github.mangi.eta.agent.voice.HANDOFF_READY"
         private const val HANDOFF_TIMEOUT_MS = 5_000L
         private const val HANDOFF_EXIT_DURATION_MS = 220L
@@ -879,6 +895,16 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                     .setAction(ACTION_SHOW)
                     .putExtra(EXTRA_SCREEN_CONTEXT_ID, screenContextId),
             )
+        }
+
+        fun show(context: Context, voiceMode: Boolean, initialQuery: String? = null) {
+            val start = Intent(context.applicationContext, EtaAssistantOverlayService::class.java)
+                .setAction(ACTION_SHOW)
+                .putExtra(EXTRA_VOICE_MODE, voiceMode)
+            if (!initialQuery.isNullOrBlank()) {
+                start.putExtra(EXTRA_INITIAL_QUERY, initialQuery)
+            }
+            context.applicationContext.startService(start)
         }
 
         fun dismiss(context: Context) {

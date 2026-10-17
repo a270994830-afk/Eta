@@ -191,9 +191,6 @@ internal interface ConversationDao : ChunkedTextDao {
     @Query("SELECT COUNT(*) FROM conversation_messages WHERE conversation_id = :conversationId")
     suspend fun countMessages(conversationId: String): Int
 
-    @Query("DELETE FROM conversations WHERE id = :conversationId")
-    suspend fun deleteConversation(conversationId: String)
-
     @Query("DELETE FROM conversation_messages WHERE conversation_id = :conversationId")
     suspend fun deleteConversationMessages(conversationId: String)
 

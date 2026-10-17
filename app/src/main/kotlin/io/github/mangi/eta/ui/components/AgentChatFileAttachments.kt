@@ -2,6 +2,7 @@ package io.github.mangi.eta.ui.components
 
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -70,7 +71,7 @@ internal val ChatInputActionIconSize = 24.dp
 internal fun AgentAttachmentPickerButton(
     popupAnchorTopPx: Int,
     popupMaxHeight: Dp,
-    onAttachImages: (List<String>) -> Unit,
+    onAttachImage: (String) -> Unit,
     onAttachFiles: (List<String>) -> Unit,
     onAttachFolder: (String) -> Unit,
     onAttachFilePath: (String) -> Unit,
@@ -80,21 +81,17 @@ internal fun AgentAttachmentPickerButton(
     var showPopup by remember { mutableStateOf(false) }
     var showPathDialog by remember { mutableStateOf(false) }
     var pathInput by remember { mutableStateOf("") }
-    // 走系统「获取内容」（ACTION_GET_CONTENT + 允许多选）：部分 ROM 会交给相册应用
-    // 处理，显示可多选的相册界面；其余情况回退为系统图片选择器，同样支持多选。
-    val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents(),
+    val photoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(),
     ) { uris ->
-        if (uris.isNotEmpty()) {
-            uris.forEach { uri ->
-                runCatching {
-                    context.contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                    )
-                }
+        uris.forEach { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
             }
-            onAttachImages(uris.map { it.toString() })
+            onAttachImage(uri.toString())
         }
     }
     val filePicker = rememberLauncherForActivityResult(
@@ -147,7 +144,9 @@ internal fun AgentAttachmentPickerButton(
                         onSelectedIndexChange = {
                             dismiss?.invoke()
                             when (index) {
-                                0 -> imagePicker.launch("image/*")
+                                0 -> photoPicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
                                 1 -> filePicker.launch(arrayOf("*/*"))
                                 2 -> folderPicker.launch(null)
                                 3 -> {

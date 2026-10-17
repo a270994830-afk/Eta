@@ -46,7 +46,7 @@ internal fun AgentHomeScreen(
             onModelSelected = { onAction(AgentHomeAction.ModelSelected(it)) },
             onSubmit = { text -> onAction(AgentHomeAction.SubmitMessage(text)) },
             onStop = { onAction(AgentHomeAction.StopRun) },
-            onAttachImages = { uris -> onAction(AgentHomeAction.ImageAttached(uris)) },
+            onAttachImage = { uri -> onAction(AgentHomeAction.ImageAttached(uri)) },
             onRemoveImage = { id -> onAction(AgentHomeAction.RemoveImage(id)) },
             onAttachFiles = { uris -> onAction(AgentHomeAction.FilesAttached(uris)) },
             onAttachFolder = { uri -> onAction(AgentHomeAction.FolderAttached(uri)) },

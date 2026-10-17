@@ -15,6 +15,7 @@ internal object AgentToolCatalog {
         skillGitHubInstall: Boolean = false,
         memoryTools: Boolean = false,
         memoryWritable: Boolean = true,
+        shadowTools: Boolean = false,
         capabilities: AgentToolCapabilities = AgentToolCapabilities(rootAvailable = true),
         localWebSearch: Boolean = true,
     ): JSONArray =
@@ -32,6 +33,7 @@ internal object AgentToolCatalog {
                 AgentWebToolCatalog.appendTo(tools, includeSearch = localWebSearch)
                 AgentBrowserToolCatalog.appendTo(tools)
             }
+            if (shadowTools) AgentShadowToolCatalog.appendTo(tools)
             AgentSkillToolCatalog.appendTo(
                 tools,
                 githubDiscovery = skillGitHubDiscovery,

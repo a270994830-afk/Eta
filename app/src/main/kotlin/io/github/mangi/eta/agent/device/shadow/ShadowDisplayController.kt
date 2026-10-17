@@ -115,7 +115,6 @@ internal class ShadowDisplayController(
                 command = command,
                 timeoutMillis = CAPTURE_TIMEOUT_MS,
                 maxOutputBytes = MAX_CAPTURE_BYTES,
-                allowLargeOutput = true,
             )
             val payload = result.stdout.trim()
             when {

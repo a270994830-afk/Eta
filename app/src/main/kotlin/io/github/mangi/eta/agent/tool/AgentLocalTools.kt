@@ -15,6 +15,7 @@ import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.model.AgentHttpClient
 import io.github.mangi.eta.agent.device.LocalNetworkPermission
+import io.github.mangi.eta.agent.device.shadow.ShadowToolSet
 import io.github.mangi.eta.agent.web.AgentWebTools
 import io.github.mangi.eta.agent.web.WebHttpTransport
 import io.github.mangi.eta.agent.model.AgentScreenObservationContract
@@ -80,6 +81,11 @@ internal class AgentLocalTools(
     private val deviceSensitiveActionToolsEnabled: () -> Boolean = {
         Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS)
     },
+    private val shadowToolsEnabled: () -> Boolean = {
+        Prefs.isEnabled(Prefs.Keys.AGENT_SHADOW_TOOLS)
+    },
+    private val shadowSessionActive: () -> Boolean = { false },
+    private val authSource: () -> AgentAuthPolicy.Source = { AgentAuthPolicy.Source.CHAT },
     private val memoryToolsEnabled: () -> Boolean = {
         runBlocking { AgentMemoryRepository.isEnabled() }
     },
@@ -109,6 +115,12 @@ internal class AgentLocalTools(
         logger = logger,
         root = rootCommandExecutor,
         rootAvailable = rootAvailable,
+    )
+    private val shadowTools = ShadowToolSet(
+        logger = logger,
+        rootCommandExecutor = rootCommandExecutor,
+        rootAvailable = rootAvailable,
+        context = context,
     )
     private val imageTools = AgentImageTools(context, rootCommandExecutor, rootAvailable)
     private val webTools = AgentWebTools(
@@ -154,6 +166,8 @@ internal class AgentLocalTools(
         rootCommandExecutor.close()
         githubSkillSource?.close()
         inspectedGitHubSnapshots.clear()
+        runCatching { shadowTools.release() }
+            .onFailure { logger.warn("Agent shadow release failed on close message=${it.message}") }
     }
 
     override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
@@ -213,6 +227,9 @@ internal class AgentLocalTools(
                 in DEVICE_TOOL_NAMES ->
                     structuredDeviceTools.execute(toolCall.name, args)
                         ?: textResult(errorResult("UNKNOWN_TOOL", "未知设备工具"))
+                in ShadowToolSet.SHADOW_TOOL_NAMES ->
+                    shadowTools.execute(toolCall.name, args)
+                        ?: textResult(errorResult("UNKNOWN_TOOL", "未知影子屏工具"))
                 "read_image" -> fileVisionTool { imageTools.readImage(args) }
                 in AgentTerminalToolCatalog.names -> textResult(terminalTool {
                     if (toolCall.name == "terminal" && args.optString("action").equals("check_root", ignoreCase = true)) checkRoot()
@@ -263,6 +280,8 @@ internal class AgentLocalTools(
                 "DEVICE_SENSITIVE_READ_TOOLS_DISABLED" to "请先允许读取敏感设备信息"
             toolName in DEVICE_SENSITIVE_ACTION_TOOL_NAMES && !deviceSensitiveActionToolsEnabled() ->
                 "DEVICE_SENSITIVE_ACTION_TOOLS_DISABLED" to "请先允许敏感设备操作"
+            toolName in ShadowToolSet.SHADOW_TOOL_NAMES && !shadowToolsEnabled() ->
+                "SHADOW_TOOLS_DISABLED" to "请先在设置中开启影子屏工具"
             else -> null
         } ?: return null
         return AgentModelClient.ToolResult(

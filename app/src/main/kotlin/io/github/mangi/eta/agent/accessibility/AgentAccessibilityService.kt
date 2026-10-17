@@ -174,6 +174,42 @@ class AgentAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * 按 displayId 读指定屏幕的窗口根节点。影子屏在其专属显示上跑目标应用时使用。
+     * 3.3.1 主线只读活动窗口，本地影子屏需要跨显示读树。
+     */
+    fun captureNodeSnapshotForDisplay(displayId: Int, maxNodes: Int): NodeSnapshot? = runOnMainSync {
+        val root = runCatching {
+            windowsOnAllDisplays?.get(displayId)
+                .orEmpty()
+                .firstOrNull { it.root != null }
+                ?.root
+        }.getOrNull() ?: return@runOnMainSync null
+        val nodeLimit = maxNodes.coerceIn(1, 120)
+        val indexedNodes = mutableListOf<IndexedNode>()
+        val traversal = NodeTraversalState(
+            maxVisitedNodes = (nodeLimit * UI_TREE_VISIT_MULTIPLIER)
+                .coerceIn(MIN_UI_TREE_VISITED_NODES, MAX_UI_TREE_VISITED_NODES),
+        )
+        collectNodes(
+            node = root,
+            out = indexedNodes,
+            maxNodes = nodeLimit,
+            depth = 0,
+            traversal = traversal,
+        )
+        NodeSnapshot(
+            id = "o${SNAPSHOT_IDS.incrementAndGet()}",
+            serviceToken = serviceToken,
+            packageName = root.packageName?.toString().orEmpty(),
+            windowId = root.windowId,
+            contentGeneration = windowContentGeneration(root.windowId),
+            capturedAtElapsedMs = SystemClock.elapsedRealtime(),
+            truncated = traversal.truncated,
+            indexedNodes = indexedNodes.toList(),
+        )
+    }
+
     /** 临时查询不发布任何全局节点状态，适用于 wait_for_text。 */
     fun queryNodes(maxNodes: Int): List<UiNode> =
         captureNodeSnapshot(maxNodes)?.nodes.orEmpty()
