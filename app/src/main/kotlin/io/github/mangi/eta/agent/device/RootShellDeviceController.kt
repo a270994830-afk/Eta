@@ -9,6 +9,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Rect
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.SystemClock
 import java.io.IOException
@@ -1358,6 +1359,7 @@ internal class RootShellDeviceController(
         val source: String,
         val complete: Boolean,
         val partial: Boolean,
+
         val expectedWindows: Int,
         val capturedWindows: Int,
         val missingWindowIds: List<Int> = emptyList(),
@@ -1443,6 +1445,29 @@ internal class RootShellDeviceController(
         }
 
         fun bytes(): ByteArray = output.toByteArray()
+    }
+
+    data class OcrCapture(
+        val bitmap: Bitmap?,
+        val source: String,
+        val complete: Boolean,
+    )
+
+    /**
+     * OCR 专用：截取原始位图（无障碍优先），调用方负责回收。
+     * 无障碍服务不可用时返回 null，由调用方给出明确错误。
+     */
+    fun captureBitmapForOcr(): OcrCapture? {
+        val service = AgentAccessibilityService.current() ?: return null
+        val result = runCatching {
+            service.captureScreenshotExcludingOverlays(screenshotExcludedPackages())
+        }.getOrNull() ?: return null
+        val bitmap = result.bitmap ?: return null
+        return OcrCapture(
+            bitmap = bitmap,
+            source = "accessibility",
+            complete = result.complete && !result.criticalWindowMissing,
+        )
     }
 
     companion object {

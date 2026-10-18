@@ -2,6 +2,7 @@ package io.github.mangi.eta.agent.tool
 
 import android.content.Context
 import android.graphics.Rect
+import android.graphics.Bitmap
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -16,6 +17,7 @@ import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.model.AgentHttpClient
 import io.github.mangi.eta.agent.device.LocalNetworkPermission
 import io.github.mangi.eta.agent.device.shadow.ShadowToolSet
+import io.github.mangi.eta.agent.ocr.OnnxOcrEngine
 import io.github.mangi.eta.agent.web.AgentWebTools
 import io.github.mangi.eta.agent.web.WebHttpTransport
 import io.github.mangi.eta.agent.model.AgentScreenObservationContract
@@ -230,6 +232,7 @@ internal class AgentLocalTools(
                 in ShadowToolSet.SHADOW_TOOL_NAMES ->
                     shadowTools.execute(toolCall.name, args)
                         ?: textResult(errorResult("UNKNOWN_TOOL", "未知影子屏工具"))
+                "ocr_screen" -> textResult(ocrScreen())
                 "read_image" -> fileVisionTool { imageTools.readImage(args) }
                 in AgentTerminalToolCatalog.names -> textResult(terminalTool {
                     if (toolCall.name == "terminal" && args.optString("action").equals("check_root", ignoreCase = true)) checkRoot()
@@ -269,6 +272,53 @@ internal class AgentLocalTools(
                 result.copy(sensitive = true)
             }
         }
+
+    private fun ocrScreen(): String {
+        val capture = deviceController.captureBitmapForOcr()
+            ?: return errorResult("SCREENSHOT_UNAVAILABLE", "无法获取屏幕截图；请确认无障碍服务已开启")
+        val bitmap = capture.bitmap ?: return errorResult("SCREENSHOT_UNAVAILABLE", "屏幕截图内容为空")
+        return try {
+            val startedAt = SystemClock.elapsedRealtime()
+            val lines = OnnxOcrEngine.recognize(context, bitmap)
+            val (screenWidth, screenHeight) = deviceController.screenDimensions()
+            val space = RootShellDeviceController.CoordinateSpace(
+                screenWidth = screenWidth,
+                screenHeight = screenHeight,
+                screenshotWidth = bitmap.width,
+                screenshotHeight = bitmap.height,
+            )
+            val items = JSONArray()
+            lines.forEach { line ->
+                val point = space.fromScreenshot(
+                    line.centerX.coerceIn(0, bitmap.width - 1),
+                    line.centerY.coerceIn(0, bitmap.height - 1),
+                )
+                items.put(
+                    JSONObject()
+                        .put("text", line.text)
+                        .put("score", line.score.toDouble())
+                        .put("x", point.x)
+                        .put("y", point.y),
+                )
+            }
+            JSONObject()
+                .put("ok", true)
+                .put("tool", "ocr_screen")
+                .put("count", lines.size)
+                .put("lines", items)
+                .put("elapsed_ms", SystemClock.elapsedRealtime() - startedAt)
+                .put("capture", JSONObject().put("source", capture.source).put("complete", capture.complete))
+                .put("note", "坐标为屏幕像素；点击请用 tap 并设置 coordinate_space=screen")
+                .put("engine", "local-onnx")
+                .put("note2", "本地离线识别，不消耗模型视觉额度")
+                .toString()
+        } catch (failure: Throwable) {
+            logger.warn("Agent ocr_screen failed: type=${failure.javaClass.simpleName}")
+            errorResult("OCR_FAILED", failure.message ?: "屏幕文字识别失败")
+        } finally {
+            bitmap.recycle()
+        }
+    }
 
     private fun deviceToolPermissionError(
         toolName: String,
