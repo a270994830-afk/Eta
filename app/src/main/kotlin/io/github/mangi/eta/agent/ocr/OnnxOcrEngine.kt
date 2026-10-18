@@ -18,7 +18,7 @@ import kotlin.math.roundToInt
  * 布局假设：屏幕截图以正向横排文字为主；后处理用连通域矩形近似 DB 输出的旋转框，
  * 不做角度分类（cls）。首次调用时从 assets 加载模型（约 31MB），之后复用会话。
  */
-internal object OnnxOcrEngine {
+object OnnxOcrEngine {
 
     data class OcrLine(
         val text: String,

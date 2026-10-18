@@ -100,6 +100,10 @@ android {
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
         versionCode = 2026101801
         versionName = "3.3.1-local"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    testOptions {
+        animationsDisabled = true
     }
 
     signingConfigs {
@@ -243,4 +247,10 @@ dependencies {
     testImplementation(libs.json)
     testImplementation(libs.room.testing)
     testImplementation(libs.robolectric)
+
+    androidTestImplementation(libs.junit)
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
 }
