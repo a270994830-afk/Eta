@@ -13,10 +13,10 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * 离线中文 OCR 引擎：PP-OCRv4 mobile（det + rec），模型与参数取自 RapidOCR（Apache-2.0）。
+ * 离线中文 OCR 引擎：PP-OCRv6 mobile 的 small 档（det + rec），模型与参数取自 RapidOCR（Apache-2.0）。
  *
  * 布局假设：屏幕截图以正向横排文字为主；后处理用连通域矩形近似 DB 输出的旋转框，
- * 不做角度分类（cls）。首次调用时从 assets 加载模型（约 16MB），之后复用会话。
+ * 不做角度分类（cls）。首次调用时从 assets 加载模型（约 31MB），之后复用会话。
  */
 internal object OnnxOcrEngine {
 
@@ -352,14 +352,14 @@ internal object OnnxOcrEngine {
         return text.toString() to confidence
     }
 
-    private const val DET_ASSET = "ocr/ch_PP-OCRv4_det_infer.onnx"
-    private const val REC_ASSET = "ocr/ch_PP-OCRv4_rec_infer.onnx"
-    private const val DICT_ASSET = "ocr/ppocr_keys_v1.txt"
+    private const val DET_ASSET = "ocr/PP-OCRv6_det_small.onnx"
+    private const val REC_ASSET = "ocr/PP-OCRv6_rec_small.onnx"
+    private const val DICT_ASSET = "ocr/ppocrv6_dict.txt"
     private const val DET_LIMIT_SIDE = 736
     private const val DET_MAX_SIDE = 1600
     private const val DET_THRESH = 0.3f
-    private const val BOX_THRESH = 0.5f
-    private const val UNCLIP_RATIO = 1.6f
+    private const val BOX_THRESH = 0.7f
+    private const val UNCLIP_RATIO = 2.0f
     private const val MIN_BOX_SIDE = 3
     private const val REC_HEIGHT = 48
     private const val REC_MIN_WH_RATIO = 320f / 48f
