@@ -20,6 +20,13 @@ internal object AgentFunctionModelResolver {
     const val PURPOSE_COMPACTION = "COMPACTION"
     const val PURPOSE_REPLY_REWRITE = "REPLY_REWRITE"
     const val PURPOSE_EMBEDDING = "EMBEDDING"
+    const val PURPOSE_VISION = "VISION"
+
+    /**
+     * 视觉/识图默认槽位：Trae 网关的 qwen-3.7-plus（本机实测稳定最强的视觉模型）。
+     * 用户未在 agent_function_model_map 显式配置 VISION 时使用。
+     */
+    private const val DEFAULT_VISION_SLOT = "builtin-trae/qwen-3.7-plus"
 
     fun slots(): JSONObject = runCatching {
         JSONObject(Prefs.localAgentPreferences()?.getString(KEY, "{}") ?: "{}")
@@ -31,9 +38,19 @@ internal object AgentFunctionModelResolver {
      */
     fun resolveSlot(purpose: String): AgentModelClient.ModelConfig? {
         val raw = slots().optString(purpose, "").trim()
+        // VISION 槽位未显式配置时回退默认的 Trae 视觉最强模型。
+        if (raw.isEmpty() && purpose == PURPOSE_VISION) return resolveSlotSpec(DEFAULT_VISION_SLOT)
         if (raw.isEmpty() || '/' !in raw) return null
         val providerId = raw.substringBefore('/').trim()
         val modelId = raw.substringAfter('/', "").trim()
+        if (providerId.isEmpty() || modelId.isEmpty()) return null
+        return resolveSlotSpec("$providerId/$modelId")
+    }
+
+    private fun resolveSlotSpec(spec: String): AgentModelClient.ModelConfig? {
+        if (spec.isEmpty() || '/' !in spec) return null
+        val providerId = spec.substringBefore('/').trim()
+        val modelId = spec.substringAfter('/', "").trim()
         if (providerId.isEmpty() || modelId.isEmpty()) return null
         return runCatching {
             kotlinx.coroutines.runBlocking {

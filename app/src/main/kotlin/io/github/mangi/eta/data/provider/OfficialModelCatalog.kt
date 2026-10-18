@@ -408,8 +408,18 @@ internal object OfficialModelCatalog {
         ),
     )
 
-    // Trae 本机网关（127.0.0.1:7864）备用模型：主用 DeepSeek
+    // Trae 本机网关（127.0.0.1:7864）备用模型：主用 DeepSeek；qwen-3.7-plus 为实测最强的视觉/识图模型
     private val traeModels: List<Model> = listOf(
+        officialModel(
+            id = "qwen-3.7-plus", modelId = "qwen-3.7-plus", displayName = "Qwen 3.7 Plus（视觉/识图最强）",
+            ownedBy = "trae", contextWindow = 131072, toolCall = true, reasoning = true,
+            inputModalities = listOf(Model.TEXT_MODALITY, Model.IMAGE_MODALITY),
+        ),
+        officialModel(
+            id = "kimi-k3", modelId = "kimi-k3", displayName = "Kimi K3（视觉）",
+            ownedBy = "trae", contextWindow = 131072, toolCall = true,
+            inputModalities = listOf(Model.TEXT_MODALITY, Model.IMAGE_MODALITY),
+        ),
         officialModel(
             id = "deepseek-v4-flash", modelId = "deepseek-v4-flash", displayName = "DeepSeek V4 Flash",
             ownedBy = "trae", contextWindow = 131072, toolCall = true, reasoning = true,

@@ -8,6 +8,7 @@ import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.media.AgentImageCodec
 import io.github.mangi.eta.agent.media.MAX_AGENT_IMAGE_BYTES
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.model.AgentFunctionModelResolver
 import java.io.File
 import java.io.IOException
 import java.io.InterruptedIOException
@@ -44,6 +45,11 @@ internal class AgentImageTools(
             val first = failures.first()
             return sensitive(error(first.code, first.message))
         }
+        // 若有 VISION 功能槽位（默认 Trae qwen-3.7-plus，实测最强视觉模型），
+        // 用该模型独立识别图片内容返回，避免当前主模型不具备视觉能力而无法理解图像。
+        if (images.size == 1) {
+            recognizeWithVisionSlot(images.first())?.let { return it }
+        }
         val content = JSONObject()
             .put("ok", true)
             .put("tool", "read_image")
@@ -53,6 +59,42 @@ internal class AgentImageTools(
             content.put("errors", JSONArray(failures.map { failure -> failure.toJson() }))
         }
         return sensitive(content = content.toString(), images = images)
+    }
+
+    /**
+     * 尝试用 VISION 槽位模型（默认 Trae qwen-3.7-plus）独立识别单张图片；
+     * 槽位不可解析或调用失败时返回 null，由调用方继续走“图片作为附件交给当前模型”。
+     */
+    private fun recognizeWithVisionSlot(image: AgentModelClient.ModelImage): AgentModelClient.ToolResult? {
+        val config = AgentFunctionModelResolver.resolveSlot(AgentFunctionModelResolver.PURPOSE_VISION)
+            ?: return null
+        return runCatching {
+            val prompt = "请识别这张图片：描述图中主要内容、醒目文字、数字与关键信息，尽量完整。"
+            val response = kotlinx.coroutines.runBlocking {
+                AgentModelClient.complete(
+                    config = config,
+                    prompt = prompt,
+                    toolExecutor = AgentModelClient.ToolExecutor { _ ->
+                        AgentModelClient.ToolResult(content = "")
+                    },
+                    images = listOf(image),
+                )
+            }
+            val text = response.content.trim()
+            if (text.isEmpty()) return null
+            sensitive(
+                content = JSONObject()
+                    .put("ok", true)
+                    .put("tool", "read_image")
+                    .put("image_attached", true)
+                    .put("recognized", true)
+                    .put("model", "${config.providerId}/${config.model}")
+                    .put("paths", JSONArray(listOf(image.reference)))
+                    .put("description", text)
+                    .toString(),
+                images = listOf(image),
+            )
+        }.getOrNull()
     }
 
     private fun requestedPaths(args: JSONObject): List<String> {
