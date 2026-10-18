@@ -23,10 +23,13 @@ internal object AgentFunctionModelResolver {
     const val PURPOSE_VISION = "VISION"
 
     /**
-     * 视觉/识图默认槽位：Trae 网关的 qwen-3.7-plus（本机实测稳定最强的视觉模型）。
-     * 用户未在 agent_function_model_map 显式配置 VISION 时使用。
+     * 视觉/识图默认候选链（按优先级）：WorkBuddy glm-5.3（首选，识图与 qwen-3.7-plus 打平）、
+     * Trae qwen-3.7-plus（备选）。用户未在 agent_function_model_map 显式配置 VISION 时使用。
      */
-    private const val DEFAULT_VISION_SLOT = "builtin-trae/qwen-3.7-plus"
+    private val DEFAULT_VISION_CHAIN: List<String> = listOf(
+        "builtin-workbuddy/cn:glm-5.3",
+        "builtin-trae/qwen-3.7-plus",
+    )
 
     fun slots(): JSONObject = runCatching {
         JSONObject(Prefs.localAgentPreferences()?.getString(KEY, "{}") ?: "{}")
@@ -38,13 +41,25 @@ internal object AgentFunctionModelResolver {
      */
     fun resolveSlot(purpose: String): AgentModelClient.ModelConfig? {
         val raw = slots().optString(purpose, "").trim()
-        // VISION 槽位未显式配置时回退默认的 Trae 视觉最强模型。
-        if (raw.isEmpty() && purpose == PURPOSE_VISION) return resolveSlotSpec(DEFAULT_VISION_SLOT)
         if (raw.isEmpty() || '/' !in raw) return null
         val providerId = raw.substringBefore('/').trim()
         val modelId = raw.substringAfter('/', "").trim()
         if (providerId.isEmpty() || modelId.isEmpty()) return null
         return resolveSlotSpec("$providerId/$modelId")
+    }
+
+    /**
+     * 视觉/识图候选链：显式配置的 VISION 槽位优先；否则按内置默认链依次尝试
+     * （WorkBuddy glm-5.3 → Trae qwen-3.7-plus）。返回有序的可解析配置，可逐个调用直至成功。
+     */
+    fun resolveVisionCandidates(): List<AgentModelClient.ModelConfig> {
+        val configured = slots().optString(PURPOSE_VISION, "").trim()
+        val chain = if (configured.isNotEmpty() && '/' in configured) {
+            listOf(configured)
+        } else {
+            DEFAULT_VISION_CHAIN
+        }
+        return chain.mapNotNull(this::resolveSlotSpec)
     }
 
     private fun resolveSlotSpec(spec: String): AgentModelClient.ModelConfig? {
