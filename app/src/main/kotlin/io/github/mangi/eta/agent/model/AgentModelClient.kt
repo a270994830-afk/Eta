@@ -260,7 +260,13 @@ internal object AgentModelClient {
 
     private fun ModelConfig.validate() {
         require(baseUrl.isNotBlank()) { "请先配置 API 地址" }
-        require(apiKey.isNotBlank()) { "请先配置 API Key" }
+        // 本机回环网关（WorkBuddy/Trae）密钥可为空：网关通常不校验或已在本机授权。
+        val localLoopback = baseUrl.startsWith("http://127.0.0.1") ||
+            baseUrl.startsWith("http://localhost") ||
+            baseUrl.startsWith("http://[::1]")
+        if (!localLoopback) {
+            require(apiKey.isNotBlank()) { "请先配置 API Key" }
+        }
         require(model.isNotBlank()) { "请先配置模型名" }
         require(
             reasoningCapabilities?.mandatory != true ||
