@@ -48,6 +48,8 @@ public final class VdCarrier {
     private static File sessionFile;
     private static File heartbeatFile;
     private static File stopFile;
+    private static File snapshotReqFile;
+    private static File snapshotOutFile;
 
     private static VirtualDisplay virtualDisplay;
     private static ImageReader imageReader;
@@ -81,6 +83,8 @@ public final class VdCarrier {
         sessionFile = new File(baseDir, "carrier.session");
         heartbeatFile = new File(baseDir, "carrier.hb");
         stopFile = new File(baseDir, "carrier.stop");
+        snapshotReqFile = new File(baseDir, "carrier.snap");
+        snapshotOutFile = new File(baseDir, "screen.png");
 
         // 一次性控制信令模式：写完文件立即退出，不创建虚拟屏。
         if (signal != null) {
@@ -242,6 +246,14 @@ public final class VdCarrier {
                 break;
             }
 
+            if (snapshotReqFile != null && snapshotReqFile.exists()) {
+                try {
+                    captureSnapshot();
+                } catch (Throwable t) {
+                    log("snapshot failed: " + t);
+                }
+            }
+
             long heartbeat = readHeartbeat();
             if (heartbeat > lastHeartbeatSeen) {
                 lastHeartbeatSeen = heartbeat;
@@ -263,6 +275,69 @@ public final class VdCarrier {
             return content.isEmpty() ? 0L : parseLong(content, 0L);
         } catch (Exception e) {
             return 0L;
+        }
+    }
+
+    /**
+     * 直接读取虚拟屏 ImageReader 的最新一帧，编码为 PNG 写入快照文件，随后删除请求标记。
+     *
+     * 这是相对 screencap -d 的低延迟取帧通道：不走子进程/SurfaceFlinger dump，
+     * 直接读 GPU 已合成的像素；同时避免对 surfaceFlingerId 解析的依赖。
+     */
+    private static void captureSnapshot() {
+        if (imageReader == null) {
+            log("snapshot skipped: ImageReader unavailable");
+            snapshotReqFile.delete();
+            return;
+        }
+        android.media.Image image = null;
+        try {
+            image = imageReader.acquireLatestImage();
+            if (image == null) {
+                snapshotReqFile.delete();
+                return;
+            }
+            android.media.Image.Plane[] planes = image.getPlanes();
+            if (planes == null || planes.length < 1) {
+                image.close();
+                snapshotReqFile.delete();
+                return;
+            }
+            int width = image.getWidth();
+            int height = image.getHeight();
+            android.media.Image.Plane plane = planes[0];
+            java.nio.ByteBuffer buffer = plane.getBuffer();
+            int pixelStride = plane.getPixelStride();
+            int rowStride = plane.getRowStride();
+            if (rowStride == 0 || pixelStride == 0) {
+                image.close();
+                snapshotReqFile.delete();
+                return;
+            }
+            int rowPadding = rowStride - pixelStride * width;
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                    width + rowPadding / pixelStride, height, android.graphics.Bitmap.Config.ARGB_8888);
+            bmp.copyPixelsFromBuffer(buffer);
+            if (rowPadding > 0) {
+                android.graphics.Bitmap cropped = android.graphics.Bitmap.createBitmap(bmp, 0, 0, width, height);
+                bmp.recycle();
+                bmp = cropped;
+            }
+            java.io.FileOutputStream out = new java.io.FileOutputStream(snapshotOutFile);
+            try {
+                bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+            } finally {
+                out.close();
+                bmp.recycle();
+            }
+            log("snapshot written " + width + "x" + height + " -> " + snapshotOutFile);
+        } catch (Exception e) {
+            log("snapshot capture error: " + e);
+        } finally {
+            if (image != null) {
+                image.close();
+            }
+            snapshotReqFile.delete();
         }
     }
 

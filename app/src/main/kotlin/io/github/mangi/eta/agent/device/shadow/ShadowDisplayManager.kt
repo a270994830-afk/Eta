@@ -194,5 +194,6 @@ internal object ShadowPaths {
     const val LOG_FILE = "$BASE_DIR/carrier.log"
     const val UI_DUMP_FILE = "$BASE_DIR/ui.xml"
     const val SCREENSHOT_FILE = "$BASE_DIR/screen.png"
+    const val SNAPSHOT_REQUEST_FILE = "$BASE_DIR/carrier.snap"
     const val CARRIER_CLASS = "io.github.mangi.eta.shadow.carrier.VdCarrier"
 }

@@ -5,6 +5,7 @@ import io.github.mangi.eta.agent.device.BoundedRootCommandExecutor
 import io.github.mangi.eta.core.AgentLogger
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /**
  * 影子屏操作执行器：在虚拟显示上启动应用、注入手势、输入文本、抓取画面。
@@ -96,10 +97,38 @@ internal class ShadowDisplayController(
     /**
      * 抓取影子屏当前画面。
      *
-     * screencap -d 需要的是 SurfaceFlinger 物理显示 ID，而非逻辑 displayId。
+     * 主路：向 sidecar 发快照请求，sidecar 直接读虚拟屏 ImageReader 的最新帧写 PNG
+     * （低延迟、不依赖 SurfaceFlinger ID）；sidecar 无快照能力或超时时回退 screencap -d。
      * 抓取结果以原始 PNG 字节返回，由调用方决定如何编码给模型。
      */
-    fun capture(session: ShadowDisplayManager.SessionState.Active): ShadowCapture =
+    fun capture(session: ShadowDisplayManager.SessionState.Active): ShadowCapture {
+        requestSnapshot(session)?.let { return it }
+        return captureViaScreencap(session)
+    }
+
+    /**
+     * 走 ImageReader 快照通道：写请求标记 → 轮询等待 sidecar 处理（删除标记）→ 读 PNG。
+     * sidecar 不支持（不删标记）或读不到有效 PNG 时返回 null，由调用方回退 screencap。
+     */
+    private fun requestSnapshot(session: ShadowDisplayManager.SessionState.Active): ShadowCapture? {
+        val reqFile = File(ShadowPaths.SNAPSHOT_REQUEST_FILE)
+        val outFile = File(ShadowPaths.SCREENSHOT_FILE)
+        runCatching { reqFile.writeText("1") }.getOrNull() ?: return null
+        var waited = 0L
+        while (waited < CAPTURE_TIMEOUT_MS) {
+            if (!reqFile.exists()) break
+            Thread.sleep(50)
+            waited += 50
+        }
+        if (reqFile.exists()) return null // sidecar 没处理（可能无快照能力），回退
+        if (!outFile.isFile) return null
+        val bytes = runCatching { outFile.readBytes() }.getOrNull() ?: return null
+        if (bytes.isEmpty()) return null
+        return ShadowCapture.Png(bytes)
+    }
+
+    /** 原 screencap -d 取帧，作为快照通道不可用时的兜底。 */
+    private fun captureViaScreencap(session: ShadowDisplayManager.SessionState.Active): ShadowCapture =
         if (session.surfaceFlingerId.isBlank() || session.surfaceFlingerId == "0") {
             ShadowCapture.Failed("SHADOW_SURFACE_ID_UNKNOWN", "影子屏的 SurfaceFlinger ID 未就绪，请稍后重试")
         } else {
