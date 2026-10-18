@@ -21,8 +21,30 @@ internal object BuiltinProviders {
     const val STEPFUN_ID = "builtin-stepfun"
     const val SILICONFLOW_ID = "builtin-siliconflow"
     const val OPENROUTER_ID = "builtin-openrouter"
+    const val WORKBUDDY_ID = "builtin-workbuddy"
+    const val TRAE_ID = "builtin-trae"
 
     val PROVIDERS: List<ProviderSetting> = listOf(
+        OpenAiCompatibleProviderSetting(
+            id = WORKBUDDY_ID,
+            name = "WorkBuddy 本机网关",
+            baseUrl = "http://127.0.0.1:7863/v1",
+            sourceType = ProviderSourceTypes.CUSTOM,
+            isBuiltIn = true,
+            sortOrder = -1,
+            systemPrompt = DEFAULT_SYSTEM_PROMPT,
+            endpointMode = OpenAiEndpointMode.CHAT_COMPLETIONS,
+        ),
+        OpenAiCompatibleProviderSetting(
+            id = TRAE_ID,
+            name = "Trae 本机网关",
+            baseUrl = "http://127.0.0.1:7864/v1",
+            sourceType = ProviderSourceTypes.CUSTOM,
+            isBuiltIn = true,
+            sortOrder = 1,
+            systemPrompt = DEFAULT_SYSTEM_PROMPT,
+            endpointMode = OpenAiEndpointMode.CHAT_COMPLETIONS,
+        ),
         OpenAiCompatibleProviderSetting(
             id = OPENAI_ID,
             name = "OpenAI",

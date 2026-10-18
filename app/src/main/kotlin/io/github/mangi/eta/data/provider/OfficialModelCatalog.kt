@@ -383,10 +383,61 @@ internal object OfficialModelCatalog {
         ),
     )
 
-    fun modelsForProvider(provider: ProviderSetting): List<Model> =
-        modelsForCatalogId(catalogIdFor(provider))
+    // WorkBuddy 本机网关（127.0.0.1:7863）内置模型：按强度与视觉/轻量分类
+    private val workbuddyModels: List<Model> = listOf(
+        officialModel(
+            id = "cn:glm-5.3-flash", modelId = "cn:glm-5.3-flash", displayName = "GLM-5.3-Flash",
+            ownedBy = "workbuddy", contextWindow = 131072, toolCall = true, reasoning = true,
+        ),
+        officialModel(
+            id = "cn:glm-5v-turbo", modelId = "cn:glm-5v-turbo", displayName = "GLM-5V-Turbo（视觉）",
+            ownedBy = "workbuddy", contextWindow = 131072, toolCall = true,
+            inputModalities = listOf(Model.TEXT_MODALITY, Model.IMAGE_MODALITY),
+        ),
+        officialModel(
+            id = "cn:deepseek-v4.1-flash", modelId = "cn:deepseek-v4.1-flash", displayName = "DeepSeek V4.1 Flash",
+            ownedBy = "workbuddy", contextWindow = 131072, toolCall = true, reasoning = true,
+        ),
+        officialModel(
+            id = "cn:glm-5.2", modelId = "cn:glm-5.2", displayName = "GLM-5.2",
+            ownedBy = "workbuddy", contextWindow = 131072, toolCall = true, reasoning = true,
+        ),
+        officialModel(
+            id = "cn:kimi-k2.8-preview", modelId = "cn:kimi-k2.8-preview", displayName = "Kimi K2.8 Preview",
+            ownedBy = "workbuddy", contextWindow = 131072, toolCall = true, reasoning = true,
+        ),
+    )
+
+    // Trae 本机网关（127.0.0.1:7864）备用模型：主用 DeepSeek
+    private val traeModels: List<Model> = listOf(
+        officialModel(
+            id = "deepseek-v4-flash", modelId = "deepseek-v4-flash", displayName = "DeepSeek V4 Flash",
+            ownedBy = "trae", contextWindow = 131072, toolCall = true, reasoning = true,
+        ),
+        officialModel(
+            id = "deepseek-v4-pro", modelId = "deepseek-v4-pro", displayName = "DeepSeek V4 Pro",
+            ownedBy = "trae", contextWindow = 131072, toolCall = true, reasoning = true,
+        ),
+        officialModel(
+            id = "doubao-seed-2.1-pro", modelId = "doubao-seed-2.1-pro", displayName = "Doubao Seed 2.1 Pro",
+            ownedBy = "trae", contextWindow = 131072, toolCall = true,
+        ),
+        officialModel(
+            id = "glm-5.3-flash", modelId = "glm-5.3-flash", displayName = "GLM-5.3-Flash",
+            ownedBy = "trae", contextWindow = 131072, toolCall = true, reasoning = true,
+        ),
+    )
+
+    fun modelsForProvider(provider: ProviderSetting): List<Model> {
+        // 本机网关内置模型优先于目录映射
+        when (provider.id) {
+            BuiltinProviders.WORKBUDDY_ID -> return workbuddyModels
+            BuiltinProviders.TRAE_ID -> return traeModels
+        }
+        return modelsForCatalogId(catalogIdFor(provider))
             .map { it.withCatalogReasoningCapabilities(catalogIdFor(provider)) }
             .withStableSortOrder()
+    }
 
     fun modelsAddedSince(provider: ProviderSetting, revision: Int): List<Model> {
         val catalogId = catalogIdFor(provider) ?: return emptyList()
