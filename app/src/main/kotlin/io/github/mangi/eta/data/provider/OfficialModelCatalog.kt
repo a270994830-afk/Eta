@@ -390,6 +390,11 @@ internal object OfficialModelCatalog {
             ownedBy = "workbuddy", contextWindow = 131072, toolCall = true, reasoning = true,
         ),
         officialModel(
+            id = "cn:glm-5.3", modelId = "cn:glm-5.3", displayName = "GLM-5.3（视觉）",
+            ownedBy = "workbuddy", contextWindow = 131072, toolCall = true, reasoning = true,
+            inputModalities = listOf(Model.TEXT_MODALITY, Model.IMAGE_MODALITY),
+        ),
+        officialModel(
             id = "cn:glm-5v-turbo", modelId = "cn:glm-5v-turbo", displayName = "GLM-5V-Turbo（视觉）",
             ownedBy = "workbuddy", contextWindow = 131072, toolCall = true,
             inputModalities = listOf(Model.TEXT_MODALITY, Model.IMAGE_MODALITY),
@@ -399,8 +404,9 @@ internal object OfficialModelCatalog {
             ownedBy = "workbuddy", contextWindow = 131072, toolCall = true, reasoning = true,
         ),
         officialModel(
-            id = "cn:glm-5.2", modelId = "cn:glm-5.2", displayName = "GLM-5.2",
+            id = "cn:glm-5.2", modelId = "cn:glm-5.2", displayName = "GLM-5.2（视觉）",
             ownedBy = "workbuddy", contextWindow = 131072, toolCall = true, reasoning = true,
+            inputModalities = listOf(Model.TEXT_MODALITY, Model.IMAGE_MODALITY),
         ),
         officialModel(
             id = "cn:kimi-k2.8-preview", modelId = "cn:kimi-k2.8-preview", displayName = "Kimi K2.8 Preview",
