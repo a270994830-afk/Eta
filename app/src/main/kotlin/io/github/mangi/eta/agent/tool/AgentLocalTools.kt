@@ -206,6 +206,8 @@ internal class AgentLocalTools(
                 }
                 "observe_screen" -> observeScreen(args)
                 "tap" -> afterAction(tap(args))
+                "tap_text" -> afterAction(tapText(args))
+                "double_tap" -> afterAction(doubleTap(args))
                 "tap_area" -> afterAction(tapArea(args))
                 "tap_element" -> afterAction(tapElement(args))
                 "long_press" -> afterAction(longPress(args))
@@ -233,6 +235,9 @@ internal class AgentLocalTools(
                     shadowTools.execute(toolCall.name, args)
                         ?: textResult(errorResult("UNKNOWN_TOOL", "未知影子屏工具"))
                 "ocr_screen" -> textResult(ocrScreen())
+                "note_add" -> textResult(noteAdd(args))
+                "note_list" -> textResult(noteList())
+                "note_clear" -> textResult(noteClear())
                 "read_image" -> fileVisionTool { imageTools.readImage(args) }
                 in AgentTerminalToolCatalog.names -> textResult(terminalTool {
                     if (toolCall.name == "terminal" && args.optString("action").equals("check_root", ignoreCase = true)) checkRoot()
@@ -556,6 +561,210 @@ internal class AgentLocalTools(
         }
         return result
     }
+
+    private fun doubleTap(args: JSONObject): String {
+        val point = convertPoint(
+            x = args.getInt("x"),
+            y = args.getInt("y"),
+            coordinateSpace = args.optString("coordinate_space"),
+        )
+        return clearOverlay(point) {
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+            showTap(point.x, point.y)
+            val first = deviceController.tap(point.x, point.y)
+            if (!first.isOkJson()) return@clearOverlay first
+            deviceController.waitMs(90)
+            deviceController.tap(point.x, point.y)
+        }
+    }
+
+    private fun notesFile(): java.io.File = java.io.File(context.filesDir, "agent_notes.json")
+
+    private fun readNotes(): JSONArray = try {
+        val file = notesFile()
+        if (file.exists()) JSONArray(file.readText()) else JSONArray()
+    } catch (_: Exception) {
+        JSONArray()
+    }
+
+    private fun writeNotes(notes: JSONArray) {
+        try {
+            notesFile().writeText(notes.toString())
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun noteAdd(args: JSONObject): String {
+        val text = args.optString("text").trim()
+        if (text.isEmpty()) return errorResult("INVALID_ARGUMENT", "text 不能为空")
+        val notes = readNotes()
+        notes.put(text)
+        writeNotes(notes)
+        return "已记录备忘（共 ${notes.length()} 条）：$text"
+    }
+
+    private fun noteList(): String {
+        val notes = readNotes()
+        if (notes.length() == 0) return "暂无备忘"
+        return buildString {
+            append("备忘（").append(notes.length()).append(" 条）：")
+            for (index in 0 until notes.length()) {
+                append("\n").append(index + 1).append(". ").append(notes.optString(index))
+            }
+        }
+    }
+
+    private fun noteClear(): String {
+        writeNotes(JSONArray())
+        return "已清空备忘"
+    }
+
+    /** 按文字匹配当前界面节点并点击；节点不可见时回退到截图 OCR。 */
+    private fun tapText(args: JSONObject): String {
+        val target = args.optString("text").trim()
+        if (target.isEmpty()) return errorResult("INVALID_ARGUMENT", "缺少 text")
+        val ordinal = args.optInt("ordinal", 1).coerceAtLeast(1)
+        val observation = deviceController.observe(
+            includeScreenshot = false,
+            includeUiTree = true,
+            maxNodes = 200,
+        )
+        val elements = observation.elementObservation
+            ?: return errorResult("NO_OBSERVATION", "无法获取当前屏幕节点；请确认无障碍服务已开启")
+        val matches = findTextMatches(elements.nodes, target)
+        if (matches.isEmpty()) {
+            tapTextByOcr(target, ordinal)?.let { return it }
+            return errorResult(
+                code = "ELEMENT_NOT_FOUND",
+                message = "当前屏幕未找到包含「$target」的元素，截图 OCR 回退也未找到；可先 observe_screen 确认界面，或改用 tap_element",
+            )
+        }
+        val node = matches.getOrNull(ordinal - 1) ?: matches.first()
+        val textCenterX = node.bounds.centerX()
+        val textCenterY = node.bounds.centerY()
+        // 文字节点常不可点击：优先取包含其中心的最小可点击祖先，其次同行可点击兄弟（如单选圆钮）。
+        val clickTarget = if (node.clickable) {
+            node
+        } else {
+            val ancestors = elements.nodes.filter { it.clickable && it.bounds.contains(textCenterX, textCenterY) }
+            ancestors.minByOrNull { it.bounds.width().toLong() * it.bounds.height() }
+                ?: elements.nodes
+                    .filter { candidate ->
+                        candidate.clickable && candidate.bounds != node.bounds &&
+                            candidate.bounds.top < node.bounds.bottom &&
+                            candidate.bounds.bottom > node.bounds.top
+                    }
+                    .minByOrNull { kotlin.math.abs(it.bounds.centerX() - textCenterX) }
+        }
+        publishedObservation.set(
+            PublishedObservation(
+                elements = elements,
+                coordinateSpace = observation.coordinateSpace,
+            ),
+        )
+        AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+        val tapPoint = clickTarget ?: node
+        val result = deviceController.tap(tapPoint.bounds.centerX(), tapPoint.bounds.centerY())
+        if (!result.isOkJson()) {
+            return errorResult(
+                code = "TAP_TEXT_FAILED",
+                message = "点击「$target」未成功；可先 observe_screen 后改用 tap_element",
+            )
+        }
+        return result
+    }
+
+    /** 图片、Canvas、自绘控件对无障碍不可见，用离线 OCR 定位后按屏幕坐标点击。 */
+    private fun tapTextByOcr(target: String, ordinal: Int): String? {
+        val capture = deviceController.captureBitmapForOcr() ?: return null
+        val bitmap = capture.bitmap ?: return null
+        return try {
+            val needle = normalizeUiText(target)
+            val candidates = OnnxOcrEngine.recognize(context, bitmap)
+                .mapNotNull { line ->
+                    val haystack = normalizeUiText(line.text)
+                    val rank = when {
+                        haystack == needle -> 0
+                        haystack.contains(needle) -> 1
+                        else -> return@mapNotNull null
+                    }
+                    line to rank
+                }
+                .sortedWith(compareBy({ it.second }, { -it.first.score }))
+            val line = candidates.getOrNull(ordinal - 1)?.first ?: candidates.firstOrNull()?.first
+                ?: return null
+            val (screenWidth, screenHeight) = deviceController.screenDimensions()
+            val space = RootShellDeviceController.CoordinateSpace(
+                screenWidth = screenWidth,
+                screenHeight = screenHeight,
+                screenshotWidth = bitmap.width,
+                screenshotHeight = bitmap.height,
+            )
+            val point = space.fromScreenshot(
+                line.centerX.coerceIn(0, bitmap.width - 1),
+                line.centerY.coerceIn(0, bitmap.height - 1),
+            )
+            AgentHapticFeedback.perform(context, AgentHapticFeedback.Type.TAP)
+            val result = deviceController.tap(point.x, point.y)
+            if (!result.isOkJson()) {
+                return errorResult(
+                    code = "TAP_TEXT_FAILED",
+                    message = "OCR 回退点击「${line.text}」未成功；可先用 ocr_screen 拿坐标后手动 tap",
+                )
+            }
+            logger.info(
+                "Agent tap_text ocr fallback: text=${line.text} x=${point.x} y=${point.y} " +
+                    "score=${line.score} capture_complete=${capture.complete}",
+            )
+            runCatching { JSONObject(result) }.getOrElse { JSONObject() }
+                .put("source", "ocr")
+                .put("matched_text", line.text)
+                .put("x", point.x)
+                .put("y", point.y)
+                .toString()
+        } catch (failure: Throwable) {
+            logger.warn("Agent tap_text ocr fallback failed: type=${failure.javaClass.simpleName}")
+            null
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    /** 归一化后按文字匹配节点：完全相等优先，其次包含；每级内可点击的排前面。 */
+    private fun findTextMatches(
+        nodes: List<RootShellDeviceController.UiNode>,
+        target: String,
+    ): List<RootShellDeviceController.UiNode> {
+        val needle = normalizeUiText(target)
+        if (needle.isEmpty()) return emptyList()
+        return nodes.mapNotNull { node ->
+            val haystack = normalizeUiText(node.text.ifBlank { node.desc })
+            if (haystack.isEmpty()) return@mapNotNull null
+            val rank = when {
+                haystack == needle -> 0
+                haystack.contains(needle) -> 1
+                else -> return@mapNotNull null
+            }
+            node to rank
+        }.sortedWith(compareBy({ it.second }, { !it.first.clickable }))
+            .map { it.first }
+    }
+
+    private fun normalizeUiText(text: String): String = text.trim()
+        .map { c ->
+            when {
+                c in '\uFF01'..'\uFF5E' -> (c.code - 0xFEE0).toChar()
+                c == '\u3000' -> ' '
+                else -> c
+            }
+        }
+        .joinToString("")
+        .replace("（", "(")
+        .replace("）", ")")
+        .replace("：", ":")
+        .replace("，", ",")
+        .lowercase()
+        .filterNot { it.isWhitespace() }
 
     private fun longPressElement(args: JSONObject): String {
         val index = args.optInt("index", -1)

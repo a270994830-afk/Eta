@@ -31,12 +31,15 @@ internal object AgentToolRequirements {
         register(
             RootRequirement.NONE,
             "get_current_context", "search_apps", "launch_app", "open_uri", "browser_use", "web_search", "fetch_url",
-            "observe_screen", "tap", "tap_area", "tap_element", "long_press",
+            "ocr_screen", "observe_screen", "tap", "tap_text", "tap_area", "tap_element", "long_press",
             "long_press_element", "swipe", "scroll", "scroll_element", "type_text", "input_text",
             "replace_text", "clear_text", "set_clipboard", "get_clipboard", "paste_text",
             "wait", "wait_for_text", "wait_for_package", "open_system_panel",
+            "note_add", "note_list", "note_clear", "double_tap",
             "set_alarm", "set_timer", "device_status", "inspect_app", "media_control", "set_volume",
             "search_notification_history", "recent_app_activity", "app_usage_summary",
+            "play_music", "play_video", "stock", "short_video", "navigate", "flashlight",
+            "call", "reply_notification", "send_sms", "open_device_action", "order_food",
             "get_current_location", "get_device_environment", "memory_get", "memory_write",
             "character_memory_get", "character_memory_write",
             "skills_list", "skills_read", "skills_read_resource", "skills_list_curated",
@@ -58,6 +61,9 @@ internal object AgentToolRequirements {
             "search_downloads", "search_notes", "search_coloros_recordings",
             "search_recording_summaries", "search_system_memories", "search_saved_places",
             "search_qq_chat_images", "search_wechat_chat_images",
+            "shadow_open", "shadow_close", "shadow_status", "shadow_launch",
+            "shadow_tap", "shadow_swipe", "shadow_input_text", "shadow_press_key",
+            "shadow_screenshot", "shadow_ui_tree",
         )
         PersonalSearchTools.names.forEach { put(it, LocalToolRequirement(RootRequirement.REQUIRED, colorOs = true)) }
         AgentPhoneToolCatalog.entries.forEach { entry ->
@@ -68,10 +74,10 @@ internal object AgentToolRequirements {
         }
         put("search_calendar_events", LocalToolRequirement(RootRequirement.PARTIAL, systemAccess = ToolSystemAccess.CALENDAR_READ))
         listOf(
-            "observe_screen", "tap", "tap_area", "tap_element", "long_press",
+            "observe_screen", "ocr_screen", "tap", "tap_text", "tap_area", "tap_element", "long_press",
             "long_press_element", "swipe", "scroll", "scroll_element", "type_text", "input_text",
             "replace_text", "clear_text", "paste_text", "press_key", "open_system_panel",
-            "wait_for_text", "wait_for_package",
+            "wait_for_text", "wait_for_package", "double_tap",
         ).forEach { name -> put(name, getValue(name).copy(accessibility = true)) }
         mapOf(
             "recent_notifications" to ToolSystemAccess.NOTIFICATIONS,
