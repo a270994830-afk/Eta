@@ -22,6 +22,7 @@ internal data class AgentChatUiState(
     val availableReasoningEfforts: List<ReasoningEffort> = emptyList(),
     val pendingImages: List<PendingImageUi> = emptyList(),
     val pendingFileReferences: List<PendingFileReferenceUi> = emptyList(),
+    val quotedMessage: QuotedMessageUi? = null,
     val appliedRuntimeRunIds: List<String> = emptyList(),
     val messageEdit: MessageEditUiState? = null,
     val roleplay: RoleplayBinding? = null,

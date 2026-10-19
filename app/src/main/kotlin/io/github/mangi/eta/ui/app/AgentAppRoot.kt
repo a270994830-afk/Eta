@@ -372,6 +372,8 @@ fun AgentAppRoot(
                                 is AgentHomeAction.FilePathAttached -> agentState.attachFilePath(action.path)
                                 is AgentHomeAction.RemoveFileReference ->
                                     agentState.removePendingFileReference(action.id)
+                                is AgentHomeAction.QuoteMessage -> agentState.quoteMessage(action.id)
+                                AgentHomeAction.ClearQuote -> agentState.clearQuote()
                                 is AgentHomeAction.EditMessage -> agentState.beginMessageEdit(action.id)
                                 AgentHomeAction.CancelMessageEdit -> agentState.cancelMessageEdit()
                                 is AgentHomeAction.DeleteMessage -> {

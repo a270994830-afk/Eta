@@ -190,6 +190,15 @@
     <item quantity="other">这条消息及之后 %d 轮对话将被删除。</item>
   </plurals>
   <string name="conversation_regenerate_title">重新生成回复？</string>
+  <string name="quote_action">引用</string>
+  <string name="quote_clear">取消引用</string>
+  <string name="quote_author_user">用户</string>
+  <string name="quote_author_assistant">助手</string>
+  <string name="answer_sources_title">来源</string>
+  <string name="answer_sources_title_count">来源 · %1$d</string>
+  <string name="answer_sources_expand">展开全部</string>
+  <string name="answer_sources_collapse">收起</string>
+  <string name="answer_sources_untitled">链接</string>
   <plurals name="conversation_regenerate_later_turns">
     <item quantity="other">将删除之后 %d 轮对话，并从这条消息重新生成。</item>
   </plurals>

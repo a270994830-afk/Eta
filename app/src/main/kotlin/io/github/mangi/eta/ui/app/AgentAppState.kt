@@ -58,12 +58,14 @@ import io.github.mangi.eta.ui.model.ConversationSummaryUi
 import io.github.mangi.eta.ui.model.MessageEditUiState
 import io.github.mangi.eta.ui.model.PendingFileReferenceUi
 import io.github.mangi.eta.ui.model.PendingImageUi
+import io.github.mangi.eta.ui.model.QuotedMessageUi
 import io.github.mangi.eta.ui.model.SystemNoticeCode
 import io.github.mangi.eta.ui.model.SystemNoticeMessageUi
 import io.github.mangi.eta.ui.model.ThinkingMessageUi
 import io.github.mangi.eta.ui.model.ToolActivityMessageUi
 import io.github.mangi.eta.ui.model.UserMessageUi
 import io.github.mangi.eta.ui.model.contentMatches
+import io.github.mangi.eta.ui.model.formatQuotedPrompt
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
@@ -835,6 +837,7 @@ internal class AgentAppState(
                 pendingImages = edit.previousImages,
                 pendingFileReferences = edit.previousFileReferences,
                 messageEdit = null,
+                quotedMessage = null,
             ))
             refreshConversationSummaries()
             persistConversations()
@@ -854,7 +857,17 @@ internal class AgentAppState(
             ).show()
             return
         }
-        val runtimePrompt = AgentFileReferencePromptCodec.format(prompt, fileReferences)
+        val runtimePrompt = AgentFileReferencePromptCodec.format(
+            homeState.quotedMessage?.let { quote ->
+                formatQuotedPrompt(
+                    quote = quote,
+                    prompt = prompt,
+                    fromUserLabel = appContext.getString(R.string.quote_author_user),
+                    fromAssistantLabel = appContext.getString(R.string.quote_author_assistant),
+                )
+            } ?: prompt,
+            fileReferences,
+        )
 
         val edit = homeState.messageEdit
         if (edit == null && selectedConversationId?.isReadOnlyExternalArchiveConversation() == true) {
@@ -921,6 +934,7 @@ internal class AgentAppState(
                 input = "",
                 pendingImages = emptyList(),
                 pendingFileReferences = emptyList(),
+                quotedMessage = null,
                 messageEdit = null,
             ),
             reasoningEffort = homeState.reasoningEffort,
@@ -938,6 +952,7 @@ internal class AgentAppState(
             }
             updateCurrentConversation(homeState.copy(
                 input = content, pendingImages = emptyList(), pendingFileReferences = emptyList(),
+                quotedMessage = null,
                 messageEdit = MessageEditUiState(messageId, homeState.input, homeState.pendingImages,
                     homeState.pendingFileReferences, hasLaterTurns = false, preserveFollowingMessages = true),
             ))
@@ -964,6 +979,7 @@ internal class AgentAppState(
                 input = parsedPrompt.request,
                 pendingImages = images,
                 pendingFileReferences = fileReferences,
+                quotedMessage = null,
                 messageEdit = MessageEditUiState(
                     targetMessageId = boundary.userMessage.id,
                     previousInput = homeState.input,
@@ -1390,6 +1406,29 @@ internal class AgentAppState(
         )
     }
 
+    fun quoteMessage(messageId: String) {
+        val quote = when (val message = homeState.messages.firstOrNull { it.id == messageId }) {
+            is UserMessageUi -> QuotedMessageUi(
+                messageId = message.id,
+                fromUser = true,
+                text = AgentFileReferencePromptCodec.parse(message.content).request,
+            )
+            is AgentMessageUi -> QuotedMessageUi(
+                messageId = message.id,
+                fromUser = false,
+                text = message.content,
+            )
+            else -> return
+        }
+        if (quote.text.isBlank()) return
+        updateCurrentConversation(homeState.copy(quotedMessage = quote))
+    }
+
+    fun clearQuote() {
+        if (homeState.quotedMessage == null) return
+        updateCurrentConversation(homeState.copy(quotedMessage = null))
+    }
+
     private fun resolveAndAttachFileReferences(
         resolver: () -> List<AgentFileReferenceGateway.Resolution>,
     ) {
@@ -1702,6 +1741,7 @@ internal class AgentAppState(
             availableReasoningEfforts = currentReasoningCapabilities?.selectableEfforts.orEmpty(),
             pendingImages = draft.pendingImages,
             pendingFileReferences = draft.pendingFileReferences,
+            quotedMessage = draft.quotedMessage,
             modelId = draft.modelId,
         )
         conversationPaneState = conversationPaneState.copy(selectedConversationId = null)

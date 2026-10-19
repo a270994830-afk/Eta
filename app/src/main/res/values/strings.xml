@@ -198,6 +198,15 @@
     <item quantity="other">This will delete %d later turns and regenerate from this message.</item>
   </plurals>
   <string name="conversation_regenerate_current_turn">The current turn will be replaced with a newly generated response.</string>
+  <string name="quote_action">Quote</string>
+  <string name="quote_clear">Remove quote</string>
+  <string name="quote_author_user">User</string>
+  <string name="quote_author_assistant">Assistant</string>
+  <string name="answer_sources_title">Sources</string>
+  <string name="answer_sources_title_count">Sources · %1$d</string>
+  <string name="answer_sources_expand">Show all</string>
+  <string name="answer_sources_collapse">Collapse</string>
+  <string name="answer_sources_untitled">Link</string>
   <string name="conversation_exported">Exported</string>
   <string name="conversation_export_failed">Export failed</string>
   <string name="conversation_export_user">User</string>

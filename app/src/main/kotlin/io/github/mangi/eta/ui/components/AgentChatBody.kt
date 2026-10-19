@@ -87,6 +87,7 @@ import io.github.mangi.eta.ui.model.AgentModelPickerUiState
 import io.github.mangi.eta.ui.model.MessageEditUiState
 import io.github.mangi.eta.ui.model.PendingFileReferenceUi
 import io.github.mangi.eta.ui.model.PendingImageUi
+import io.github.mangi.eta.ui.model.QuotedMessageUi
 import io.github.mangi.eta.ui.model.ThinkingMessageUi
 import io.github.mangi.eta.ui.model.ToolActivityMessageUi
 import io.github.mangi.eta.ui.model.ToolSummaryMessageUi
@@ -139,6 +140,7 @@ internal fun AgentChatBody(
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
     pendingFileReferences: List<PendingFileReferenceUi>,
+    quotedMessage: QuotedMessageUi?,
     messageEdit: MessageEditUiState?,
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
     onCompactContext: () -> Unit,
@@ -152,11 +154,13 @@ internal fun AgentChatBody(
     onAttachFolder: (String) -> Unit,
     onAttachFilePath: (String) -> Unit,
     onRemoveFileReference: (String) -> Unit,
+    onClearQuote: () -> Unit,
     onEditMessage: (String) -> Unit,
     onCancelMessageEdit: () -> Unit,
     onDeleteMessage: (String) -> Unit,
     onRegenerateMessage: (String) -> Unit,
     onSelectReplyCandidate: (String, Int) -> Unit,
+    onQuoteMessage: (String) -> Unit,
     onSuggestionClick: (String) -> Unit,
     onRunTraceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
@@ -231,6 +235,7 @@ internal fun AgentChatBody(
             availableReasoningEfforts = availableReasoningEfforts,
             pendingImages = pendingImages,
             pendingFileReferences = pendingFileReferences,
+            quotedMessage = quotedMessage,
             messageEdit = messageEdit,
             showEmptySuggestions = !isKeyboardVisible,
             keepBottomAnchored = keepBottomAnchored,
@@ -253,11 +258,13 @@ internal fun AgentChatBody(
             onAttachFolder = onAttachFolder,
             onAttachFilePath = onAttachFilePath,
             onRemoveFileReference = onRemoveFileReference,
+            onClearQuote = onClearQuote,
             onEditMessage = onEditMessage,
             onCancelMessageEdit = onCancelMessageEdit,
             onDeleteMessage = onDeleteMessage,
             onRegenerateMessage = onRegenerateMessage,
             onSelectReplyCandidate = onSelectReplyCandidate,
+            onQuoteMessage = onQuoteMessage,
             onSuggestionClick = onSuggestionClick,
             onRunTraceClick = onRunTraceClick,
             onOpenBrowser = onOpenBrowser,
@@ -282,6 +289,7 @@ private fun AgentChatScaffold(
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
     pendingFileReferences: List<PendingFileReferenceUi>,
+    quotedMessage: QuotedMessageUi?,
     messageEdit: MessageEditUiState?,
     showEmptySuggestions: Boolean,
     keepBottomAnchored: Boolean,
@@ -298,11 +306,13 @@ private fun AgentChatScaffold(
     onAttachFolder: (String) -> Unit,
     onAttachFilePath: (String) -> Unit,
     onRemoveFileReference: (String) -> Unit,
+    onClearQuote: () -> Unit,
     onEditMessage: (String) -> Unit,
     onCancelMessageEdit: () -> Unit,
     onDeleteMessage: (String) -> Unit,
     onRegenerateMessage: (String) -> Unit,
     onSelectReplyCandidate: (String, Int) -> Unit,
+    onQuoteMessage: (String) -> Unit,
     onSuggestionClick: (String) -> Unit,
     onRunTraceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
@@ -339,6 +349,7 @@ private fun AgentChatScaffold(
                 availableReasoningEfforts = availableReasoningEfforts,
                 pendingImages = pendingImages,
                 pendingFileReferences = pendingFileReferences,
+                quotedMessage = quotedMessage,
                 messageEdit = messageEdit,
                 onSubmit = onSubmit,
                 onReasoningEffortChange = onReasoningEffortChange,
@@ -352,6 +363,7 @@ private fun AgentChatScaffold(
                 onAttachFolder = onAttachFolder,
                 onAttachFilePath = onAttachFilePath,
                 onRemoveFileReference = onRemoveFileReference,
+                onClearQuote = onClearQuote,
                 onCancelMessageEdit = onCancelMessageEdit,
             )
         },
@@ -380,6 +392,7 @@ private fun AgentChatScaffold(
                 onDeleteMessage = onDeleteMessage,
                 onRegenerateMessage = onRegenerateMessage,
                 onSelectReplyCandidate = onSelectReplyCandidate,
+                onQuoteMessage = onQuoteMessage,
                 messageActionsEnabled = !isStreaming && messageEdit == null,
                 editTargetMessageId = messageEdit?.targetMessageId,
                 currentBrowserMessageId = currentBrowserMessageId,
@@ -408,6 +421,7 @@ internal fun AgentConversationMessages(
     onDeleteMessage: (String) -> Unit = {},
     onRegenerateMessage: (String) -> Unit = {},
     onSelectReplyCandidate: (String, Int) -> Unit = { _, _ -> },
+    onQuoteMessage: (String) -> Unit = {},
     messageActionsEnabled: Boolean = false,
     editTargetMessageId: String? = null,
     currentBrowserMessageId: String? = null,
@@ -673,6 +687,7 @@ internal fun AgentConversationMessages(
                             onDeleteMessage = onDeleteMessage,
                             onRegenerateMessage = onRegenerateMessage,
                             onSelectReplyCandidate = onSelectReplyCandidate,
+                            onQuoteMessage = onQuoteMessage,
                             modifier = itemModifier,
                         )
                     }
@@ -890,6 +905,7 @@ private fun AgentChatBottomBar(
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
     pendingFileReferences: List<PendingFileReferenceUi>,
+    quotedMessage: QuotedMessageUi?,
     messageEdit: MessageEditUiState?,
     onSubmit: (String) -> Unit,
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
@@ -903,6 +919,7 @@ private fun AgentChatBottomBar(
     onAttachFolder: (String) -> Unit,
     onAttachFilePath: (String) -> Unit,
     onRemoveFileReference: (String) -> Unit,
+    onClearQuote: () -> Unit,
     onCancelMessageEdit: () -> Unit,
 ) {
     Column(
@@ -974,6 +991,7 @@ private fun AgentChatBottomBar(
                 availableReasoningEfforts = availableReasoningEfforts,
                 pendingImages = pendingImages,
                 pendingFileReferences = pendingFileReferences,
+                quotedMessage = quotedMessage,
                 isEditingMessage = messageEdit != null,
                 editHasLaterTurns = messageEdit?.hasLaterTurns == true,
                 preserveFollowingMessages = messageEdit?.preserveFollowingMessages == true,
@@ -989,6 +1007,7 @@ private fun AgentChatBottomBar(
                 onAttachFolder = onAttachFolder,
                 onAttachFilePath = onAttachFilePath,
                 onRemoveFileReference = onRemoveFileReference,
+                onClearQuote = onClearQuote,
                 onCancelMessageEdit = onCancelMessageEdit,
                 modifier = Modifier.fillMaxWidth(),
             )

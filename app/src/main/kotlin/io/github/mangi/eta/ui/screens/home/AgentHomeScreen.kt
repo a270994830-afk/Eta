@@ -39,6 +39,7 @@ internal fun AgentHomeScreen(
             availableReasoningEfforts = state.availableReasoningEfforts,
             pendingImages = state.pendingImages,
             pendingFileReferences = state.pendingFileReferences,
+            quotedMessage = state.quotedMessage,
             messageEdit = state.messageEdit,
             onReasoningEffortChange = { onAction(AgentHomeAction.ReasoningEffortChanged(it)) },
             onCompactContext = { onAction(AgentHomeAction.CompactContext) },
@@ -52,11 +53,13 @@ internal fun AgentHomeScreen(
             onAttachFolder = { uri -> onAction(AgentHomeAction.FolderAttached(uri)) },
             onAttachFilePath = { path -> onAction(AgentHomeAction.FilePathAttached(path)) },
             onRemoveFileReference = { id -> onAction(AgentHomeAction.RemoveFileReference(id)) },
+            onClearQuote = { onAction(AgentHomeAction.ClearQuote) },
             onEditMessage = { id -> onAction(AgentHomeAction.EditMessage(id)) },
             onCancelMessageEdit = { onAction(AgentHomeAction.CancelMessageEdit) },
             onDeleteMessage = { id -> onAction(AgentHomeAction.DeleteMessage(id)) },
             onRegenerateMessage = { id -> onAction(AgentHomeAction.RegenerateMessage(id)) },
             onSelectReplyCandidate = { id, index -> onAction(AgentHomeAction.SelectReplyCandidate(id, index)) },
+            onQuoteMessage = { id -> onAction(AgentHomeAction.QuoteMessage(id)) },
             onSuggestionClick = { prompt ->
                 onAction(AgentHomeAction.SubmitMessage(prompt))
             },

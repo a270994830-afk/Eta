@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.FormatQuote
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
@@ -93,6 +94,10 @@ import io.github.mangi.eta.ui.markdown.StreamingMarkdownState
 import io.github.mangi.eta.ui.markdown.THINKING_LINE_HEIGHT_SP
 import io.github.mangi.eta.ui.model.AgentChatMessageUi
 import io.github.mangi.eta.ui.model.AgentMessageUi
+import io.github.mangi.eta.ui.model.DisplayQuote
+import io.github.mangi.eta.ui.model.extractAnswerSources
+import io.github.mangi.eta.ui.model.plainQuoteText
+import io.github.mangi.eta.ui.model.splitLeadingQuote
 import io.github.mangi.eta.ui.model.RunTraceMessageUi
 import io.github.mangi.eta.ui.model.SuggestionChipsMessageUi
 import io.github.mangi.eta.ui.model.SystemNoticeCode
@@ -202,6 +207,7 @@ internal fun ChatMessageItem(
     onEditMessage: (String) -> Unit = {},
     onDeleteMessage: (String) -> Unit = {},
     onRegenerateMessage: (String) -> Unit = {},
+    onQuoteMessage: (String) -> Unit = {},
     onSelectReplyCandidate: (String, Int) -> Unit = { _, _ -> },
 ) {
     when (message) {
@@ -212,6 +218,7 @@ internal fun ChatMessageItem(
             isEditing = isEditing,
             onEdit = { onEditMessage(message.id) },
             onDelete = { onDeleteMessage(message.id) },
+            onQuote = { onQuoteMessage(message.id) },
             modifier = modifier,
         )
         is AgentMessageUi -> AgentMessageBlock(
@@ -226,6 +233,7 @@ internal fun ChatMessageItem(
             onRegenerate = { onRegenerateMessage(message.id) },
             onEdit = { onEditMessage(message.id) },
             onSelectCandidate = { onSelectReplyCandidate(message.id, it) },
+            onQuote = { onQuoteMessage(message.id) },
             modifier = modifier,
         )
         is SystemNoticeMessageUi -> if (message.code == SystemNoticeCode.ContextCompaction) {
@@ -261,6 +269,7 @@ internal fun ChatMessageItem(
                 messageActionsEnabled = messageActionsEnabled,
                 onDelete = { onDeleteMessage(message.id) },
                 onRegenerate = { onRegenerateMessage(message.id) },
+                showQuoteAction = false,
                 modifier = modifier,
             )
         }
@@ -293,6 +302,7 @@ private fun UserMessageBubble(
     isEditing: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onQuote: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     @Suppress("DEPRECATION")
@@ -309,6 +319,11 @@ private fun UserMessageBubble(
     }
     val visiblePrompt = remember(message.content) {
         AgentFileReferencePromptCodec.parse(message.content)
+    }
+    val userQuoteLabel = stringResource(R.string.quote_author_user)
+    val assistantQuoteLabel = stringResource(R.string.quote_author_assistant)
+    val quoteDisplay = remember(visiblePrompt.request, userQuoteLabel, assistantQuoteLabel) {
+        splitLeadingQuote(visiblePrompt.request, userQuoteLabel, assistantQuoteLabel)
     }
     val overlayBubbleColor = if (MiuixTheme.colorScheme.background.luminance() < 0.5f) {
         Color(0xFF37393D)
@@ -332,6 +347,14 @@ private fun UserMessageBubble(
             tooltip = {
                 RichTooltip(insideMargin = PaddingValues(horizontal = 8.dp, vertical = 6.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        MessageTooltipAction(
+                            icon = Icons.Rounded.FormatQuote,
+                            label = stringResource(R.string.quote_action),
+                            onClick = {
+                                tooltipState.dismiss()
+                                onQuote()
+                            },
+                        )
                         MessageTooltipAction(
                             icon = Icons.Rounded.ContentCopy,
                             label = stringResource(R.string.ui_copy_4edd1d),
@@ -426,14 +449,21 @@ private fun UserMessageBubble(
                         ),
                     )
                 }
-                if (visiblePrompt.request.isNotBlank()) {
-                    SelectionContainer {
-                        Text(
-                            text = visiblePrompt.request,
-                            style = MiuixTheme.textStyles.body1,
-                            color = MiuixTheme.colorScheme.onSurface,
-                        )
-                    }
+                if (quoteDisplay != null) {
+                    SentQuoteBlock(
+                        quote = quoteDisplay,
+                        modifier = Modifier.padding(
+                            bottom = if (quoteDisplay.rest.isNotBlank()) 8.dp else 0.dp
+                        ),
+                    )
+                }
+                val requestText = quoteDisplay?.rest ?: visiblePrompt.request
+                if (requestText.isNotBlank()) {
+                    Text(
+                        text = requestText,
+                        style = MiuixTheme.textStyles.body1,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
                 }
                 if (message.isEdited) {
                     Text(
@@ -444,6 +474,50 @@ private fun UserMessageBubble(
                     )
                 }
             }
+        }
+    }
+}
+
+/** 历史气泡里的引用：左侧强调条 + 作者行 + 截断正文，与输入区引用条同一套语言。 */
+@Composable
+private fun SentQuoteBlock(
+    quote: DisplayQuote,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .squircleSurface(
+                color = MiuixTheme.colorScheme.surface,
+                cornerRadius = 10.dp,
+            )
+            .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(2.dp)
+                .height(if (quote.label != null) 30.dp else 18.dp)
+                .background(
+                    MiuixTheme.colorScheme.primary.copy(alpha = 0.6f),
+                    RoundedCornerShape(2.dp),
+                ),
+        )
+        Column(modifier = Modifier.padding(start = 8.dp)) {
+            if (quote.label != null) {
+                Text(
+                    text = quote.label,
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.primary,
+                    maxLines = 1,
+                )
+            }
+            Text(
+                text = plainQuoteText(quote.body),
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -546,6 +620,8 @@ private fun AgentMessageBlock(
     onRegenerate: () -> Unit,
     onEdit: () -> Unit = {},
     onSelectCandidate: (Int) -> Unit = {},
+    onQuote: () -> Unit = {},
+    showQuoteAction: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     @Suppress("DEPRECATION")
@@ -579,6 +655,13 @@ private fun AgentMessageBlock(
 
     val character = LocalRoleplayChat.current.takeUnless { assistantOverlay }
     val isGreeting = character != null && message.id.startsWith(GreetingMessagePrefix)
+    val answerSources = remember(message.id, message.content) {
+        if (message.content.contains("](") || message.content.contains("<http")) {
+            extractAnswerSources(message.content)
+        } else {
+            emptyList()
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -658,6 +741,14 @@ private fun AgentMessageBlock(
                     tint = if (copied) MiuixTheme.colorScheme.primary else null,
                 )
                 if (allowSpeech) SpeechReadAloudButton(message.id, message.content)
+                if (showQuoteAction) {
+                    AnswerActionButton(
+                        icon = Icons.Rounded.FormatQuote,
+                        contentDescription = stringResource(R.string.quote_action),
+                        onClick = onQuote,
+                        enabled = messageActionsEnabled,
+                    )
+                }
                 if (showMessageActions) {
                     if (message.characterEditable) {
                         AnswerActionButton(
@@ -694,6 +785,16 @@ private fun AgentMessageBlock(
                     }
                 }
             }
+        }
+        AnimatedVisibility(
+            visible = showCopyAction && !message.isStreaming && revealComplete && answerSources.isNotEmpty(),
+            enter = fadeIn(tween(200)) + expandVertically(tween(200)),
+            exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
+        ) {
+            AnswerSourcesCard(
+                sources = answerSources,
+                modifier = Modifier.padding(top = 6.dp),
+            )
         }
     }
 }

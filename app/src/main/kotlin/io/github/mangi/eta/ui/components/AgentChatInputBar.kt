@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -69,6 +70,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,6 +80,8 @@ import io.github.mangi.eta.ui.model.AgentContextUsageUi
 import io.github.mangi.eta.ui.model.AgentModelPickerUiState
 import io.github.mangi.eta.ui.model.PendingFileReferenceUi
 import io.github.mangi.eta.ui.model.PendingImageUi
+import io.github.mangi.eta.ui.model.QuotedMessageUi
+import io.github.mangi.eta.ui.model.plainQuoteText
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.Icon
@@ -113,6 +117,7 @@ internal fun AgentChatInputBar(
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
     pendingFileReferences: List<PendingFileReferenceUi>,
+    quotedMessage: QuotedMessageUi?,
     isEditingMessage: Boolean,
     editHasLaterTurns: Boolean,
     preserveFollowingMessages: Boolean,
@@ -128,6 +133,7 @@ internal fun AgentChatInputBar(
     onAttachFolder: (String) -> Unit,
     onAttachFilePath: (String) -> Unit,
     onRemoveFileReference: (String) -> Unit,
+    onClearQuote: () -> Unit,
     onCancelMessageEdit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -179,6 +185,20 @@ internal fun AgentChatInputBar(
             .fillMaxWidth(),
     ) {
         SpeechInputFeedback(dictation)
+        AnimatedVisibility(
+            visible = quotedMessage != null,
+            enter = fadeIn(tween(160)),
+            exit = fadeOut(tween(100)) + shrinkVertically(tween(160)),
+        ) {
+            quotedMessage?.let { quote ->
+                QuotedMessageStrip(
+                    quote = quote,
+                    onClear = onClearQuote,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+        }
+
         AnimatedVisibility(
             visible = pendingFileReferences.isNotEmpty(),
             enter = fadeIn(tween(160)),
@@ -492,6 +512,66 @@ private fun ThinkingEffortChip(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * 待发送的引用：只占两行，左侧强调条与引用语义对齐；关闭按钮的触控区按 32dp 放大。
+ */
+@Composable
+private fun QuotedMessageStrip(
+    quote: QuotedMessageUi,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .squircleSurface(
+                color = MiuixTheme.colorScheme.surfaceContainer,
+                cornerRadius = 12.dp,
+            )
+            .padding(start = 10.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(2.dp)
+                .height(30.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.6f)),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(
+                    if (quote.fromUser) R.string.quote_author_user else R.string.quote_author_assistant,
+                ),
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.primary,
+                maxLines = 1,
+            )
+            Text(
+                text = plainQuoteText(quote.text),
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clickable(interactionSource = null, indication = null, onClick = onClear),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = stringResource(R.string.quote_clear),
+                modifier = Modifier.size(16.dp),
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
         }
     }
 }

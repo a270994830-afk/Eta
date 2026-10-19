@@ -189,6 +189,15 @@
     <item quantity="other">此訊息及後續 %d 輪對話將被刪除。</item>
   </plurals>
   <string name="conversation_regenerate_title">要重新產生回覆嗎？</string>
+  <string name="quote_action">引用</string>
+  <string name="quote_clear">取消引用</string>
+  <string name="quote_author_user">使用者</string>
+  <string name="quote_author_assistant">助手</string>
+  <string name="answer_sources_title">來源</string>
+  <string name="answer_sources_title_count">來源 · %1$d</string>
+  <string name="answer_sources_expand">展開全部</string>
+  <string name="answer_sources_collapse">收起</string>
+  <string name="answer_sources_untitled">連結</string>
   <plurals name="conversation_regenerate_later_turns">
     <item quantity="other">將刪除後續 %d 輪對話，並從此訊息重新產生。</item>
   </plurals>
