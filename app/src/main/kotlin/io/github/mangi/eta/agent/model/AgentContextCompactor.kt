@@ -1,6 +1,7 @@
 package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.agent.runtime.AgentRunController
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -10,8 +11,51 @@ internal class AgentContextCompactor(
     private val provider: AgentProviderClient,
     private val controller: AgentRunController,
     private val roleplay: Boolean = false,
+    private val deadlineMs: Long = COMPACTION_DEADLINE_MS,
 ) {
     fun compact(
+        messages: JSONArray,
+        systemCount: Int,
+        sensitiveIds: Set<String>,
+    ): JSONArray {
+        val running = AtomicBoolean(true)
+        val watchdog = startDeadlineWatchdog(running)
+        try {
+            return compactInternal(messages, systemCount, sensitiveIds)
+        } finally {
+            running.set(false)
+            watchdog.interrupt()
+        }
+    }
+
+    /**
+     * 摘要截断靠 OkHttp 的 readTimeout 兜不住：它只防“完全没有数据”的静止，服务端持续发送
+     * 心跳或分片时永不触发，界面就会一直停在“正在压缩上下文…”。这里按总时限掐断在途请求
+     * （不取消整个 run），使压缩走正常失败分支并给出明确文案。
+     */
+    private fun startDeadlineWatchdog(running: AtomicBoolean): Thread =
+        Thread {
+            try {
+                Thread.sleep(deadlineMs)
+            } catch (_: InterruptedException) {
+                return@Thread
+            }
+            // 到点后持续掐断：失败后的重试会重新发起请求，只掐一次会让总时长再次失控。
+            while (running.get()) {
+                controller.abortInFlightRequests()
+                try {
+                    Thread.sleep(500)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+            }
+        }.apply {
+            isDaemon = true
+            name = "eta-compaction-deadline"
+            start()
+        }
+
+    private fun compactInternal(
         messages: JSONArray,
         systemCount: Int,
         sensitiveIds: Set<String>,
@@ -69,6 +113,8 @@ internal class AgentContextCompactor(
     }
 
     companion object {
+        private const val COMPACTION_DEADLINE_MS = 150_000L
+
         fun signedAnthropicToolRoundFailure() = failure(
             "ANTHROPIC_THINKING_CONTEXT_LOCKED",
             "当前 Anthropic 工具回合的思考签名绑定原始上下文，提交工具结果前无法压缩上下文。",

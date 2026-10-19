@@ -3,6 +3,8 @@ package io.github.mangi.eta.agent.model
 import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentRunController
 import io.github.mangi.eta.agent.runtime.AgentTokenUsage
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -316,6 +318,37 @@ class AgentContextCompactionTest {
         assertNotNull(result.contextSnapshot)
         assertEquals(finalText, result.contextSnapshot!!.messages.last().content)
         assertEquals(finalText, result.transcript.last().content)
+    }
+
+    @Test
+    fun hangingSummaryIsAbortedByDeadlineInsteadOfSpinningForever() {
+        val controller = AgentRunController()
+        val aborted = CountDownLatch(1)
+        val hangingProvider = object : AgentProviderClient {
+            override val id = "fixture"
+            override val capabilities = ProviderCapabilities(EndpointKind.CHAT_COMPLETIONS, true, true, true, true, false, false)
+            override fun complete(
+                request: ProviderRequest,
+                runController: AgentRunController,
+                onEvent: (ProviderEvent) -> Unit,
+            ): ProviderResponse {
+                val binding = runController.register { aborted.countDown() }
+                try {
+                    // 模拟“服务端只发心跳、readTimeout 永不触发”的悬挂流。
+                    assertTrue("压缩请求未被总时限掐断", aborted.await(10, TimeUnit.SECONDS))
+                    throw java.io.IOException("Canceled")
+                } finally {
+                    binding.close()
+                }
+            }
+        }
+        val startedAt = System.nanoTime()
+        assertThrows(Exception::class.java) {
+            AgentContextCompactor(config, hangingProvider, controller, deadlineMs = 200)
+                .compact(jsonHistory(), 1, emptySet())
+        }
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+        assertTrue("压缩在 ${elapsedMs}ms 后才结束", elapsedMs < 10_000)
     }
 
     private fun history() = (1..6).flatMap { turn -> listOf(
