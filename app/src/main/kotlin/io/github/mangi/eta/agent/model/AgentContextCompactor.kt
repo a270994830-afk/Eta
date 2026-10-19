@@ -19,9 +19,17 @@ internal class AgentContextCompactor(
         sensitiveIds: Set<String>,
     ): JSONArray {
         val running = AtomicBoolean(true)
-        val watchdog = startDeadlineWatchdog(running)
+        val deadlineHit = AtomicBoolean(false)
+        val watchdog = startDeadlineWatchdog(running, deadlineHit)
         try {
             return compactInternal(messages, systemCount, sensitiveIds)
+        } catch (failure: Throwable) {
+            if (!deadlineHit.get()) throw failure
+            controller.throwIfCancelled()
+            throw AgentModelFailure(
+                CONTEXT_SUMMARY_TIMEOUT, false,
+                "压缩摘要超过 ${deadlineMs / 1000} 秒仍未完成，已中止，原始上下文已保留。", failure,
+            )
         } finally {
             running.set(false)
             watchdog.interrupt()
@@ -33,13 +41,14 @@ internal class AgentContextCompactor(
      * 心跳或分片时永不触发，界面就会一直停在“正在压缩上下文…”。这里按总时限掐断在途请求
      * （不取消整个 run），使压缩走正常失败分支并给出明确文案。
      */
-    private fun startDeadlineWatchdog(running: AtomicBoolean): Thread =
+    private fun startDeadlineWatchdog(running: AtomicBoolean, deadlineHit: AtomicBoolean): Thread =
         Thread {
             try {
                 Thread.sleep(deadlineMs)
             } catch (_: InterruptedException) {
                 return@Thread
             }
+            deadlineHit.set(true)
             // 到点后持续掐断：失败后的重试会重新发起请求，只掐一次会让总时长再次失控。
             while (running.get()) {
                 controller.abortInFlightRequests()
@@ -114,6 +123,7 @@ internal class AgentContextCompactor(
 
     companion object {
         private const val COMPACTION_DEADLINE_MS = 150_000L
+        const val CONTEXT_SUMMARY_TIMEOUT = "CONTEXT_SUMMARY_TIMEOUT"
 
         fun signedAnthropicToolRoundFailure() = failure(
             "ANTHROPIC_THINKING_CONTEXT_LOCKED",

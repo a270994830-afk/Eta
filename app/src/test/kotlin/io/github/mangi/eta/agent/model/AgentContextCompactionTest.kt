@@ -343,12 +343,14 @@ class AgentContextCompactionTest {
             }
         }
         val startedAt = System.nanoTime()
-        assertThrows(Exception::class.java) {
+        val failure = assertThrows(AgentModelFailure::class.java) {
             AgentContextCompactor(config, hangingProvider, controller, deadlineMs = 200)
                 .compact(jsonHistory(), 1, emptySet())
         }
         val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
         assertTrue("压缩在 ${elapsedMs}ms 后才结束", elapsedMs < 10_000)
+        assertEquals(AgentContextCompactor.CONTEXT_SUMMARY_TIMEOUT, failure.code)
+        assertTrue("失败文案不明确：${failure.message}", failure.message.orEmpty().contains("原始上下文已保留"))
     }
 
     private fun history() = (1..6).flatMap { turn -> listOf(
