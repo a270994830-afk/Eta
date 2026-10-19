@@ -2,6 +2,8 @@ package io.github.mangi.eta.agent.skill
 
 import android.content.Context
 import android.content.res.AssetManager
+import android.os.Environment
+import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.data.db.SkillRegistryEntity
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +17,8 @@ import java.nio.file.LinkOption
 private const val BUILTIN_SKILL_MANIFEST_ASSET = "builtin_skills/manifest.json"
 internal const val BUILTIN_SKILL_SOURCE = "builtin"
 internal const val USER_SKILL_SOURCE = "user"
+internal const val SHARED_SKILL_SOURCE = "shared"
+private const val SHARED_SOURCE = SHARED_SKILL_SOURCE
 private const val BUILTIN_SOURCE = BUILTIN_SKILL_SOURCE
 private const val USER_SOURCE = USER_SKILL_SOURCE
 private const val INSTALL_STATE_INSTALLED = "installed"
@@ -154,7 +158,7 @@ private class BuiltinSkillAssetStore(
         listBuiltins().forEach { builtin ->
             val entry = registry[builtin.id]
             if (entry?.installState == INSTALL_STATE_REMOVED_BUILTIN) return@forEach
-            if (entry?.source == USER_SOURCE) return@forEach
+            if (entry?.source == USER_SOURCE || entry?.source == SHARED_SOURCE) return@forEach
             val targetDir = File(skillsRoot, builtin.id)
             if (!isSafeBuiltinSkillInstallation(targetDir)) {
                 installBuiltinInternal(builtin)
@@ -215,6 +219,7 @@ private class BuiltinSkillAssetStore(
 class SkillIndexService(
     private val context: Context,
     private val skillsRoot: File,
+    private val sharedRootsProvider: () -> List<File> = { emptyList() },
 ) {
     private val indexLock = Any()
     private val registryStore = SkillRegistryStore(context.applicationContext)
@@ -225,6 +230,10 @@ class SkillIndexService(
 
     @Volatile
     private var cachedManagementEntries: List<SkillIndexEntry>? = null
+
+    /** 共享目录开关改变后指纹随之变化，用于让索引缓存重新构建。 */
+    @Volatile
+    private var cachedSharedRootFingerprint: String? = null
 
     /**
      * 所有可读写索引的入口都先在同一把跨进程锁内完成待处理文件事务与 Room 快照恢复。
@@ -251,6 +260,11 @@ class SkillIndexService(
                 if (forceRefresh) builtinsSeeded = false
                 seedBuiltinSkillsLocked()
                 if (forceRefresh) cachedManagementEntries = null
+                val fingerprint = sharedRootsProvider().joinToString("|") { it.absolutePath }
+                if (fingerprint != cachedSharedRootFingerprint) {
+                    cachedManagementEntries = null
+                    cachedSharedRootFingerprint = fingerprint
+                }
                 cachedManagementEntries ?: buildManagementEntries().also {
                     cachedManagementEntries = it
                 }
@@ -479,30 +493,54 @@ class SkillIndexService(
         registry: Map<String, SkillRegistryEntry>,
         builtinAssets: Map<String, BuiltinSkillAsset>,
     ): List<SkillIndexEntry> {
-        if (!skillsRoot.exists()) return emptyList()
-        val canonicalRoot = skillsRoot.canonicalFile.toPath()
-        return skillsRoot.walkTopDown()
-            .onEnter { dir ->
-                dir.name != ".git" &&
-                    !Files.isSymbolicLink(dir.toPath()) &&
-                    runCatching { dir.canonicalFile.toPath().startsWith(canonicalRoot) }.getOrDefault(false)
-            }
-            .filter {
-                it.isFile && it.name == "SKILL.md" && !Files.isSymbolicLink(it.toPath())
-            }
-            .mapNotNull { skillFile ->
-                buildInstalledEntry(skillFile.parentFile ?: return@mapNotNull null, registry, builtinAssets)
-            }
-            .distinctBy { it.rootPath }
-            .toList()
+        val privateEntries = scanRoot(skillsRoot, registry, builtinAssets, shared = false)
+        // 共享根只读；同名时应用私有目录优先。
+        val sharedRoots = runCatching { sharedRootsProvider() }.getOrDefault(emptyList())
+        val sharedEntries = sharedRoots.flatMap { root ->
+            scanRoot(root, registry, builtinAssets, shared = true)
+        }
+        return (privateEntries + sharedEntries).distinctBy { it.id }
+    }
+
+    private fun scanRoot(
+        root: File,
+        registry: Map<String, SkillRegistryEntry>,
+        builtinAssets: Map<String, BuiltinSkillAsset>,
+        shared: Boolean,
+    ): List<SkillIndexEntry> {
+        if (!root.exists()) return emptyList()
+        val canonicalRoot = runCatching { root.canonicalFile.toPath() }.getOrNull() ?: return emptyList()
+        return runCatching {
+            val entries = mutableListOf<SkillIndexEntry>()
+            root.walkTopDown()
+                .onEnter { dir ->
+                    dir.name != ".git" &&
+                        !Files.isSymbolicLink(dir.toPath()) &&
+                        runCatching { dir.canonicalFile.toPath().startsWith(canonicalRoot) }.getOrDefault(false)
+                }
+                .filter {
+                    it.isFile && it.name == "SKILL.md" && !Files.isSymbolicLink(it.toPath())
+                }
+                .forEach { skillFile ->
+                    buildInstalledEntry(
+                        skillDir = skillFile.parentFile ?: return@forEach,
+                        registry = registry,
+                        builtinAssets = builtinAssets,
+                        canonicalRoot = canonicalRoot,
+                        shared = shared,
+                    )?.let(entries::add)
+                }
+            entries.distinctBy { it.rootPath }
+        }.getOrDefault(emptyList())
     }
 
     private fun buildInstalledEntry(
         skillDir: File,
         registry: Map<String, SkillRegistryEntry>,
         builtinAssets: Map<String, BuiltinSkillAsset>,
+        canonicalRoot: java.nio.file.Path,
+        shared: Boolean,
     ): SkillIndexEntry? {
-        val canonicalRoot = skillsRoot.canonicalFile.toPath()
         val canonicalDir = skillDir.canonicalFile
         val canonicalPath = canonicalDir.toPath()
         if (!canonicalPath.startsWith(canonicalRoot) || canonicalPath == canonicalRoot) return null
@@ -527,8 +565,12 @@ class SkillIndexService(
             hasAssets = File(canonicalDir, "assets").isDirectory,
             hasEvals = File(canonicalDir, "evals").isDirectory,
             enabled = registryState?.enabled ?: true,
-            source = registryState?.source?.ifBlank { null }
-                ?: if (builtinAsset != null) BUILTIN_SOURCE else USER_SOURCE,
+            source = if (shared) {
+                SHARED_SOURCE
+            } else {
+                registryState?.source?.ifBlank { null }
+                    ?: if (builtinAsset != null) BUILTIN_SOURCE else USER_SOURCE
+            },
             installed = true,
         )
     }
@@ -557,6 +599,7 @@ class SkillIndexService(
 
     private fun sourceRank(source: String): Int = when (source) {
         BUILTIN_SOURCE -> 0
+        SHARED_SOURCE -> 1
         else -> 2
     }
 
@@ -576,9 +619,15 @@ class SkillIndexService(
 // SkillLoader — 加载技能正文和附属资源
 // =====================================================================================
 
-class SkillLoader(private val skillsRoot: File) {
+class SkillLoader(
+    private val skillsRoot: File,
+    sharedRoots: List<File> = emptyList(),
+) {
     private val canonicalSkillsRoot = skillsRoot.canonicalFile
-    private val resourceReader = SkillResourceReader(skillsRoot)
+    private val canonicalRoots = (listOf(skillsRoot) + sharedRoots)
+        .mapNotNull { runCatching { it.canonicalFile }.getOrNull() }
+        .distinctBy { it.absolutePath }
+    private val resourceReader = SkillResourceReader(skillsRoot, sharedRoots = sharedRoots)
 
     fun load(entry: SkillIndexEntry, triggerReason: String): ResolvedSkillContext? =
         SkillMutationLock.withLock(skillsRoot) {
@@ -593,9 +642,11 @@ class SkillLoader(private val skillsRoot: File) {
         val requestedRoot = File(entry.rootPath)
         if (Files.isSymbolicLink(requestedRoot.toPath())) return null
         val skillDir = runCatching { requestedRoot.canonicalFile }.getOrNull() ?: return null
-        val rootPath = canonicalSkillsRoot.toPath()
         val skillPath = skillDir.toPath()
-        if (!skillPath.startsWith(rootPath) || skillPath == rootPath) return null
+        val insideAllowedRoot = canonicalRoots.any { allowed ->
+            skillPath.startsWith(allowed.toPath()) && skillPath != allowed.toPath()
+        }
+        if (!insideAllowedRoot) return null
         val skillFile = File(skillDir, "SKILL.md")
         if (Files.isSymbolicLink(skillFile.toPath())) return null
         val parsed = SkillParser.parseSkillFile(skillFile) ?: return null
@@ -651,18 +702,26 @@ object SkillRuntime {
 
     fun skillsRoot(context: Context): File = File(context.filesDir, "skills")
 
+    /** 跨 App 共享的技能目录（只读），可通过设置开关关闭。 */
+    fun sharedSkillsRoots(context: Context): List<File> {
+        if (!Prefs.isEnabled(Prefs.Keys.AGENT_SKILL_SHARED_DIR)) return emptyList()
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        return listOf(File(downloads, "智能体/skills"))
+    }
+
     fun createIndexService(context: Context): SkillIndexService {
         sharedIndexService?.let { return it }
         return synchronized(this) {
             sharedIndexService ?: SkillIndexService(
                 context = context.applicationContext,
                 skillsRoot = skillsRoot(context),
+                sharedRootsProvider = { sharedSkillsRoots(context) },
             ).also { sharedIndexService = it }
         }
     }
 
     fun createLoader(context: Context): SkillLoader =
-        SkillLoader(skillsRoot(context))
+        SkillLoader(skillsRoot(context), sharedRoots = sharedSkillsRoots(context))
 
     fun createPackageInstaller(context: Context): SkillPackageInstaller =
         SkillPackageInstaller(
@@ -671,5 +730,5 @@ object SkillRuntime {
         )
 
     fun createResourceReader(context: Context): SkillResourceReader =
-        SkillResourceReader(skillsRoot(context))
+        SkillResourceReader(skillsRoot(context), sharedRoots = sharedSkillsRoots(context))
 }

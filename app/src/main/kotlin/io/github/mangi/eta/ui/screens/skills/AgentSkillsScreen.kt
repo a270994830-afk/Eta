@@ -71,7 +71,7 @@ fun AgentSkillsScreen(
     ) {
         val installed = state.skills.filter { it.installed }
         val builtinInstalled = installed.filter { it.source == "builtin" }
-        val userInstalled = installed.filter { it.canDeleteUserSkill }
+        val userInstalled = installed.filter { it.source == "user" || it.source == "shared" }
         val removed = state.skills.filter { !it.installed }
 
         item(key = "zip-import-title") { EtaPreferenceGroupTitle(stringResource(R.string.ui_install_087db6)) }
@@ -146,7 +146,11 @@ fun AgentSkillsScreen(
                             onToggle = { enabled ->
                                 onAction(AgentSkillsAction.ToggleSkill(skill.id, enabled))
                             },
-                            onDelete = { deleteTarget = skill },
+                            onDelete = if (skill.canDeleteUserSkill) {
+                                { deleteTarget = skill }
+                            } else {
+                                null
+                            },
                         )
                     }
                 }

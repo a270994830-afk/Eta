@@ -17,8 +17,12 @@ data class SkillResourceLimits(
 class SkillResourceReader internal constructor(
     skillsRoot: File,
     private val limits: SkillResourceLimits = SkillResourceLimits(),
+    sharedRoots: List<File> = emptyList(),
 ) {
     private val canonicalSkillsRoot = skillsRoot.canonicalFile
+    private val canonicalRoots = (listOf(skillsRoot) + sharedRoots)
+        .mapNotNull { runCatching { it.canonicalFile }.getOrNull() }
+        .distinctBy { it.absolutePath }
 
     fun listResources(
         entry: SkillIndexEntry,
@@ -157,9 +161,11 @@ class SkillResourceReader internal constructor(
     private fun validateSkillRoot(entry: SkillIndexEntry): File? {
         if (!entry.installed) return null
         val root = runCatching { File(entry.rootPath).canonicalFile }.getOrNull() ?: return null
-        val skillsPath = canonicalSkillsRoot.toPath()
         val rootPath = root.toPath()
-        if (!rootPath.startsWith(skillsPath) || rootPath == skillsPath || !root.isDirectory) return null
+        val insideAllowedRoot = canonicalRoots.any { allowed ->
+            rootPath.startsWith(allowed.toPath()) && rootPath != allowed.toPath()
+        }
+        if (!insideAllowedRoot || !root.isDirectory) return null
         return root
     }
 

@@ -63,6 +63,9 @@ internal object Prefs {
         /** 工具精简模式（CLI）：只向模型下发核心工具 + search_tools，其余按需检索。 */
         const val AGENT_TOOL_CLI_MODE = "agent_tool_cli_mode"
 
+        /** 除应用私有 Skills 目录外，额外读取 /sdcard/Download/智能体/skills 下的共享技能。 */
+        const val AGENT_SKILL_SHARED_DIR = "agent_skill_shared_dir"
+
         /** 按功能分配模型：{"SUMMARY":"providerId/modelId", ...}。 */
         const val AGENT_FUNCTION_MODEL_MAP = "agent_function_model_map"
 
@@ -110,6 +113,7 @@ internal object Prefs {
             MCP_SERVER_ALLOW_SENSITIVE to false,
             MCP_CONFIRM_TRADES to true,
             AGENT_TOOL_CLI_MODE to false,
+            AGENT_SKILL_SHARED_DIR to true,
             AGENT_MCP_TOOLS_EAGER to false,
             EXTERNAL_CHAT_ENABLED to false,
         )
@@ -134,6 +138,7 @@ internal object Prefs {
             MCP_CONFIRM_TRADES,
             EXTERNAL_CHAT_ENABLED,
             AGENT_TOOL_CLI_MODE,
+            AGENT_SKILL_SHARED_DIR,
             AGENT_MCP_TOOLS_EAGER,
         )
     }
