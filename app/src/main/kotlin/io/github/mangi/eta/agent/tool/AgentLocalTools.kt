@@ -105,6 +105,7 @@ internal class AgentLocalTools(
     private val githubSkillSource: PublicGitHubSkillSource? = null,
     private val skillPackageInstaller: SkillPackageInstaller? = null,
     runAvailableSkillIds: Set<String> = emptySet(),
+    runAvailableSkillIdsProvider: (() -> Set<String>)? = null,
     pendingSkillConflict: PendingSkillConflictCapability? = null,
     private val rootAvailable: () -> Boolean = { RootAccess.isGranted },
 ) : AgentModelClient.ToolExecutor, AutoCloseable {
@@ -151,8 +152,10 @@ internal class AgentLocalTools(
     )
 
     private val publishedObservation = AtomicReference(PublishedObservation())
-    private val runAvailableSkillIds = runAvailableSkillIds
-        .mapTo(mutableSetOf(), SkillParser::normalizeSkillLookup)
+    private val runAvailableSkillIds = AtomicReference(
+        runAvailableSkillIds.mapTo(mutableSetOf(), SkillParser::normalizeSkillLookup),
+    )
+    private val runAvailableSkillIdsProvider = runAvailableSkillIdsProvider
     private val mutatedSkillIds = ConcurrentHashMap.newKeySet<String>()
     private val skillTreeMutationUncertain = AtomicBoolean(false)
     private val pendingSkillConflict = AtomicReference(pendingSkillConflict)
@@ -174,6 +177,7 @@ internal class AgentLocalTools(
 
     override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
         runCatching {
+            refreshRunAvailableSkillIds()
             val args = JSONObject(toolCall.argumentsJson.ifBlank { "{}" })
             if (AgentToolRequirements.find(toolCall.name) != null &&
                 AgentToolRequirements.rootDenied(toolCall.name, args, rootAvailable())
@@ -1545,7 +1549,17 @@ internal class AgentLocalTools(
 
     private fun isVisibleInCurrentRun(skillId: String): Boolean {
         val normalized = SkillParser.normalizeSkillLookup(skillId)
-        return normalized in runAvailableSkillIds && normalized !in mutatedSkillIds
+        return normalized in runAvailableSkillIds.get() && normalized !in mutatedSkillIds
+    }
+
+    /**
+     * MCP 通道的执行器长生命周期，没有对话轮次可依；每次工具调用按当前安装态重取可见技能，
+     * 装完的技能下一次调用即可见。聊天路径不传 provider，保持「本轮变更下一轮生效」。
+     */
+    private fun refreshRunAvailableSkillIds() {
+        val provider = runAvailableSkillIdsProvider ?: return
+        runAvailableSkillIds.set(provider().mapTo(mutableSetOf(), SkillParser::normalizeSkillLookup))
+        mutatedSkillIds.clear()
     }
 
     private fun nextTurnRequired(skillId: String): String = errorResult(

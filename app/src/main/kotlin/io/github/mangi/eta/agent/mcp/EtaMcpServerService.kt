@@ -110,11 +110,13 @@ internal class EtaMcpServerService : Service() {
             cacheRoot = applicationContext.cacheDir,
             baseClient = AgentHttpClient.client,
         )
-        val availableSkillIds = runCatching {
-            skillIndexService.listInstalledSkills()
-                .filter { SkillCompatibilityChecker.evaluate(it).available }
-                .mapTo(mutableSetOf()) { it.id }
-        }.getOrDefault(mutableSetOf())
+        val availableSkillIdsProvider: () -> Set<String> = {
+            runCatching {
+                skillIndexService.listInstalledSkills()
+                    .filter { SkillCompatibilityChecker.evaluate(it).available }
+                    .mapTo(mutableSetOf()) { it.id }
+            }.getOrDefault(mutableSetOf())
+        }
         return AgentLocalTools(
             context = applicationContext,
             logger = io.github.mangi.eta.core.AndroidAgentLogger,
@@ -137,7 +139,7 @@ internal class EtaMcpServerService : Service() {
             skillResourceReader = skillResourceReader,
             githubSkillSource = githubSkillSource,
             skillPackageInstaller = skillPackageInstaller,
-            runAvailableSkillIds = availableSkillIds,
+            runAvailableSkillIdsProvider = availableSkillIdsProvider,
             // 与聊天侧 AgentRuntimeRunExecutor 对齐：MCP 通道同样先过无障碍闸门，防外部客户端绕过 GUI 操作前置检查。
             beforeToolExecution = { toolName ->
                 if (!AgentToolRequirements.requiresAccessibility(toolName)) {

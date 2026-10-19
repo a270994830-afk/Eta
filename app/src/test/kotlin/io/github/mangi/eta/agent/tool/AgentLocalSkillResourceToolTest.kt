@@ -4,9 +4,11 @@ import io.github.mangi.eta.data.db.EtaDatabase
 import android.content.Context
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.skill.SkillIndexService
+import io.github.mangi.eta.agent.skill.SkillLoader
 import io.github.mangi.eta.agent.skill.SkillResourceReader
 import io.github.mangi.eta.core.AgentLogger
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -63,6 +65,54 @@ class AgentLocalSkillResourceToolTest {
         assertFalse(json.optBoolean("ok", false))
         assertEquals("INVALID_RELATIVE_PATH", json.getString("code"))
     }
+
+    @Test
+    fun providerRefreshesVisibleSkillsOnEveryCall() {
+        val context = RuntimeEnvironment.getApplication() as Context
+        val skillsRoot = temporaryFolder.newFolder("skills-refresh")
+        val skillRoot = File(skillsRoot, "resource-demo").also { it.mkdirs() }
+        File(skillRoot, "SKILL.md").writeText(
+            """
+            ---
+            name: resource-demo
+            description: Read bounded reference files in tests.
+            ---
+
+            # Resource demo
+            """.trimIndent(),
+        )
+        val indexService = SkillIndexService(context, skillsRoot)
+        indexService.listSkillsForManagement(forceRefresh = true)
+        val visible = AtomicReference<Set<String>>(emptySet())
+        val tools = AgentLocalTools(
+            context = context,
+            logger = NoOpLogger,
+            terminalToolsEnabled = { false },
+            skillIndexService = indexService,
+            skillLoader = SkillLoader(skillsRoot),
+            runAvailableSkillIdsProvider = { visible.get() },
+        )
+
+        val hidden = readSkill(tools)
+        assertFalse(hidden.toString(), hidden.optBoolean("ok", false))
+        assertEquals("NEXT_TURN_REQUIRED", hidden.getString("code"))
+
+        visible.set(setOf("resource-demo"))
+        val shown = readSkill(tools)
+        assertTrue(shown.toString(), shown.getBoolean("ok"))
+        tools.close()
+    }
+
+    private fun readSkill(tools: AgentLocalTools): JSONObject =
+        JSONObject(
+            tools.execute(
+                AgentModelClient.ToolCall(
+                    id = "skill-read",
+                    name = "skills_read",
+                    argumentsJson = JSONObject().put("skillId", "resource-demo").toString(),
+                ),
+            ).content,
+        )
 
     private fun fixture(): Fixture {
         val context = RuntimeEnvironment.getApplication() as Context
