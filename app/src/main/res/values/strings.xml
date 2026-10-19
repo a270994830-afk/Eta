@@ -349,6 +349,9 @@
   <string name="ui_enable_web_browsing_tools_8b6b03">Enable web search, reading and browser</string>
   <string name="ui_enable_memory_4b69b7">Enable memory</string>
   <string name="ui_enable_device_direct_tools_e2d595">Enable device direct tools</string>
+  <string name="settings_tool_cli_mode">Compact tool catalog (search on demand)</string>
+  <string name="settings_skill_shared_dir">Read shared skills directory</string>
+  <string name="settings_shadow_tools">Shadow screen tools</string>
   <string name="ui_back_to_bottom_32282e">back to bottom</string>
   <string name="ui_enter_the_url_in_the_address_bar_or_let_the_agent_br_e2ae90">Enter the URL in the address bar, or let the Agent browse the page for you. Sessions are only used within Eta.</string>
   <string name="ui_copy_4edd1d">copy</string>

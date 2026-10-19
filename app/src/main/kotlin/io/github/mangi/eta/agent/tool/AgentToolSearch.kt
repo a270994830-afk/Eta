@@ -15,15 +15,18 @@ internal object AgentToolSearch {
         "get_current_context",
         "observe_screen",
         "ocr_screen",
+        "tap",
         "tap_text",
         "tap_element",
-        "input_text",
+        "long_press",
+        "swipe",
+        "scroll",
+        "type_text",
         "press_key",
         "launch_app",
         "wait_for_text",
         "wait_for_package",
         "terminal",
-        "run_command",
         "read_file",
         "write_file",
         "list_directory",
@@ -83,26 +86,62 @@ internal object AgentToolSearch {
         deferredProvider?.invoke() ?: JSONArray()
     }.getOrDefault(JSONArray())
 
-    /** 按关键词检索工具（匹配 name / description），返回精简 schema 列表。 */
-    fun search(query: String, limit: Int): String {
+    /**
+     * 按关键词检索工具（匹配 name / description），返回命中的原始工具 schema。
+     * 命中的工具会在运行内解锁到下一轮的工具目录——多数模型只肯调用目录里声明过的
+     * 函数，只把 schema 写成文本它们不会据此发起调用。
+     */
+    fun searchHits(query: String, limit: Int): JSONArray {
         val keyword = query.trim().lowercase()
         val max = limit.coerceIn(1, 30)
         val matches = JSONArray()
         collectMatches(fullCatalog(), keyword, max, matches)
         // 延迟工具（MCP 等）也参与检索，但只在还有余量时补充
         if (matches.length() < max) collectMatches(deferredTools(), keyword, max, matches)
+        return matches
+    }
+
+    /** 把检索结果渲染成给模型看的文本（名称、说明与参数）。 */
+    fun renderHits(hits: JSONArray, query: String): String {
+        val matches = JSONArray()
+        for (index in 0 until hits.length()) {
+            val function = hits.optJSONObject(index)?.optJSONObject("function") ?: continue
+            matches.put(
+                JSONObject()
+                    .put("name", function.optString("name", ""))
+                    .put("description", function.optString("description", "").take(400))
+                    .put("parameters", function.optJSONObject("parameters") ?: JSONObject().put("type", "object")),
+            )
+        }
         return JSONObject()
             .put("ok", true)
             .put("query", query)
             .put("count", matches.length())
             .put(
                 "hint",
-                "拿到需要的工具 schema 后，直接用它的 name 发起一次普通工具调用即可（不需要再搜索）。" +
+                "命中的工具已经出现在你下一轮的工具列表里，直接用它的 name 发起一次普通工具调用即可。" +
                     "MCP 服务器提供的工具也在本检索库里。",
             )
             .put("tools", matches)
             .toString()
     }
+
+    /** 把命中的工具并入运行内工具列表（跳过核心工具与已存在的名字）。 */
+    fun unlock(target: JSONArray, hits: JSONArray) {
+        val existing = mutableSetOf<String>()
+        for (index in 0 until target.length()) {
+            nameOf(target.optJSONObject(index))?.let(existing::add)
+        }
+        for (index in 0 until hits.length()) {
+            val tool = hits.optJSONObject(index) ?: continue
+            val name = nameOf(tool) ?: continue
+            if (name in CORE_TOOL_NAMES || !existing.add(name)) continue
+            target.put(tool)
+        }
+    }
+
+    private fun nameOf(tool: JSONObject?): String? =
+        tool?.optJSONObject("function")?.optString("name", "")?.takeIf { it.isNotEmpty() }
 
     private fun collectMatches(catalog: JSONArray, keyword: String, max: Int, out: JSONArray) {
         for (index in 0 until catalog.length()) {
@@ -117,12 +156,7 @@ internal object AgentToolSearch {
             ) {
                 continue
             }
-            out.put(
-                JSONObject()
-                    .put("name", name)
-                    .put("description", description.take(400))
-                    .put("parameters", function.optJSONObject("parameters") ?: JSONObject().put("type", "object")),
-            )
+            out.put(JSONObject(tool.toString()))
         }
     }
 
@@ -140,20 +174,21 @@ internal object AgentToolSearch {
             .put("required", JSONArray()),
     )
 
-    /** CLI 模式下的工具目录：核心工具 + search_tools。 */
-    fun cliTools(capabilities: AgentToolCapabilities): JSONArray {
-        val full = fullCatalog()
+    /** 按 CLI 精简模式裁剪目录：核心工具 + search_tools，其余按需检索。 */
+    fun compact(catalog: JSONArray): JSONArray {
         val result = JSONArray()
-        for (index in 0 until full.length()) {
-            val tool = full.optJSONObject(index) ?: continue
+        var searchIncluded = false
+        for (index in 0 until catalog.length()) {
+            val tool = catalog.optJSONObject(index) ?: continue
             val name = tool.optJSONObject("function")?.optString("name", "") ?: continue
+            if (name == "search_tools") searchIncluded = true
             if (name in CORE_TOOL_NAMES) result.put(tool)
         }
         if (result.length() == 0) {
             // 检索库不可用时退回完整目录，避免模型无工具可用。
-            return full
+            return catalog
         }
-        result.put(searchToolSchema())
+        if (!searchIncluded) result.put(searchToolSchema())
         return result
     }
 }

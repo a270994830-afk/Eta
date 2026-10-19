@@ -16,7 +16,9 @@ import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.automirrored.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.FilterAlt
+import androidx.compose.material.icons.rounded.FolderShared
 import androidx.compose.material.icons.rounded.GppMaybe
 import androidx.compose.material.icons.rounded.Hearing
 import androidx.compose.material.icons.rounded.ImportContacts
@@ -356,6 +358,26 @@ private fun SettingsPageContent(
                     SwitchPref(
                         context = context,
                         prefs = agentPrefs,
+                        title = stringResource(R.string.settings_tool_cli_mode),
+                        key = Prefs.Keys.AGENT_TOOL_CLI_MODE,
+                        icon = Icons.AutoMirrored.Rounded.ManageSearch,
+                        iconTint = EtaPreferenceColors.Blue,
+                    )
+
+                    EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.settings_skill_shared_dir),
+                        key = Prefs.Keys.AGENT_SKILL_SHARED_DIR,
+                        icon = Icons.Rounded.FolderShared,
+                        iconTint = EtaPreferenceColors.Green,
+                    )
+
+                    EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
                         title = stringResource(R.string.ui_enable_web_browsing_tools_8b6b03),
                         key = Prefs.Keys.AGENT_BROWSER_TOOLS,
                         icon = Icons.Rounded.Language,
@@ -390,6 +412,16 @@ private fun SettingsPageContent(
                         key = Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS,
                         icon = Icons.Rounded.GppMaybe,
                         iconTint = EtaPreferenceColors.Orange,
+                    )
+
+                    EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context,
+                        prefs = agentPrefs,
+                        title = stringResource(R.string.settings_shadow_tools),
+                        key = Prefs.Keys.AGENT_SHADOW_TOOLS,
+                        icon = Icons.Rounded.Layers,
+                        iconTint = EtaPreferenceColors.Blue,
                     )
 
                     EtaPreferenceDivider()

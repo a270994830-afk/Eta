@@ -23,6 +23,7 @@ internal object AgentRuntimeRequestConfigResolver {
             deviceDirectTools = entry.deviceDirectTools,
             deviceSensitiveReadTools = entry.deviceSensitiveReadTools,
             deviceSensitiveActionTools = entry.deviceSensitiveActionTools,
+            shadowTools = entry.shadowTools,
         )
         val handoff = request.handoff ?: return request.copy(config = config)
         val archivePayload = AgentExternalArchivePayload.from(handoff.payload)

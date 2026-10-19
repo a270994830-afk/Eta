@@ -1186,6 +1186,7 @@ internal class AgentAppState(
                     agentBooleanForUi(Prefs.Keys.AGENT_DEVICE_SENSITIVE_READ_TOOLS),
                 deviceSensitiveActionTools =
                     agentBooleanForUi(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
+                shadowTools = agentBooleanForUi(Prefs.Keys.AGENT_SHADOW_TOOLS),
                 thinkingEnabled = permittedReasoningEffort.enablesReasoning,
                 reasoningEffort = permittedReasoningEffort,
             )

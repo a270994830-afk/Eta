@@ -339,6 +339,9 @@
   <string name="ui_enable_web_browsing_tools_8b6b03">启用网页搜索、读取与浏览器</string>
   <string name="ui_enable_memory_4b69b7">启用记忆</string>
   <string name="ui_enable_device_direct_tools_e2d595">启用设备直达工具</string>
+  <string name="settings_tool_cli_mode">工具精简模式（按需检索）</string>
+  <string name="settings_skill_shared_dir">读取共享技能目录</string>
+  <string name="settings_shadow_tools">影子屏工具</string>
   <string name="ui_back_to_bottom_32282e">回到底部</string>
   <string name="ui_enter_the_url_in_the_address_bar_or_let_the_agent_br_e2ae90">在地址栏输入网址，或让 Agent 帮你查阅网页。会话只在 Eta 内使用。</string>
   <string name="ui_copy_4edd1d">复制</string>

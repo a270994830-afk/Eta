@@ -5,6 +5,7 @@ import io.github.mangi.eta.agent.accessibility.AgentAccessibilityKeeper
 import io.github.mangi.eta.agent.model.AgentConversationCodec
 import io.github.mangi.eta.agent.model.AgentConversationToolCatalog
 import io.github.mangi.eta.agent.tool.ConversationHistoryTool
+import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.model.AgentModelExecutionException
@@ -249,6 +250,7 @@ internal class AgentRuntimeRunExecutor(
             val mcpToolsEager = io.github.mangi.eta.config.Prefs.isEnabled(
                 io.github.mangi.eta.config.Prefs.Keys.AGENT_MCP_TOOLS_EAGER,
             )
+            val compactTools = Prefs.isEnabled(Prefs.Keys.AGENT_TOOL_CLI_MODE)
             if (mcpToolsEager) {
                 AgentToolSearch.registerDeferredTools(null)
             } else {
@@ -263,7 +265,8 @@ internal class AgentRuntimeRunExecutor(
                 if (historyTool != null) tools.put(AgentConversationToolCatalog.schema())
                 if (characterMemoryTools != null && memoryEnabled) CharacterMemoryTools.appendSchemas(tools)
                 if (!mcpToolsEager && mcpTools.length() > 0) {
-                    // 延迟模式下给模型一个发现入口：服务器清单（schema 走 search_tools 现取）
+                    // 延迟模式下给模型一个发现入口：search_tools 现取 schema，mcp_servers_list 列服务器
+                    if (!compactTools) tools.put(AgentToolSearch.searchToolSchema())
                     val catalog = AgentToolSearch.fullCatalog()
                     for (index in 0 until catalog.length()) {
                         val tool = catalog.optJSONObject(index) ?: continue
@@ -275,7 +278,14 @@ internal class AgentRuntimeRunExecutor(
                 }
             }
             val runToolExecutor = AgentModelClient.ToolExecutor { call ->
-                if (call.name == AgentConversationToolCatalog.READ_HISTORY && historyTool != null) {
+                if (call.name == "search_tools") {
+                    val args = runCatching { JSONObject(call.argumentsJson) }.getOrDefault(JSONObject())
+                    val query = args.optString("query")
+                    val hits = AgentToolSearch.searchHits(query, args.optInt("limit", 12))
+                    // 下一轮 toolsFor 会重新读取 runTools，命中的工具因此变成可调用工具。
+                    AgentToolSearch.unlock(runTools, hits)
+                    AgentModelClient.ToolResult(content = AgentToolSearch.renderHits(hits, query))
+                } else if (call.name == AgentConversationToolCatalog.READ_HISTORY && historyTool != null) {
                     historyTool.execute(call)
                 } else if (call.name in CharacterMemoryTools.NAMES && characterMemoryTools != null) {
                     characterMemoryTools.execute(call)
@@ -318,6 +328,7 @@ internal class AgentRuntimeRunExecutor(
                 memoryContext = memoryContext,
                 additionalTools = runTools,
                 executionContext = executor.terminalExecutionContext,
+                compactTools = compactTools,
             ) { event ->
                 timing.accept(event)
                 acceptEvent(

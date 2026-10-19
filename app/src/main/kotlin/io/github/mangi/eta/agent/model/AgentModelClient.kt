@@ -8,6 +8,7 @@ import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.agent.tool.AgentToolCapabilities
 import io.github.mangi.eta.agent.tool.AgentToolRequirements
+import io.github.mangi.eta.agent.tool.AgentToolSearch
 import io.github.mangi.eta.data.model.AnthropicProviderSetting
 import io.github.mangi.eta.data.model.CustomBody
 import io.github.mangi.eta.data.model.CustomHeader
@@ -50,6 +51,7 @@ internal object AgentModelClient {
                         Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_READ_TOOLS),
                     deviceSensitiveActionTools =
                         Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
+                    shadowTools = Prefs.isEnabled(Prefs.Keys.AGENT_SHADOW_TOOLS),
                     thinkingEnabled = effort.enablesReasoning,
                     reasoningEffort = effort,
                     autoCompactionEnabled = Prefs.isEnabled(Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED),
@@ -78,6 +80,7 @@ internal object AgentModelClient {
                 Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_READ_TOOLS),
             deviceSensitiveActionTools =
                 Prefs.isEnabled(Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS),
+            shadowTools = Prefs.isEnabled(Prefs.Keys.AGENT_SHADOW_TOOLS),
             thinkingEnabled = Prefs.isEnabled(Prefs.Keys.AGENT_THINKING_ENABLED),
             reasoningEffort = ReasoningEffort.fromLegacy(
                 Prefs.isEnabled(Prefs.Keys.AGENT_THINKING_ENABLED)
@@ -108,7 +111,8 @@ internal object AgentModelClient {
         assistantScreenContext: String = "",
         onContextSnapshot: (AgentContextSnapshot) -> Unit = {},
         onTranscript: (List<ConversationMessage>) -> Unit = {},
-        onEvent: (AgentEvent) -> Unit = {}
+        compactTools: Boolean = false,
+        onEvent: (AgentEvent) -> Unit = {},
     ): ModelResponse.Text {
         config.validate()
         val initialCapabilities = capabilitiesProvider()
@@ -147,15 +151,24 @@ internal object AgentModelClient {
                 deviceDirectTools = config.deviceDirectTools,
                 deviceSensitiveReadTools = config.deviceSensitiveReadTools,
                 deviceSensitiveActionTools = config.deviceSensitiveActionTools,
+                shadowTools = config.shadowTools,
                 skillGitHubDiscovery = true,
                 skillGitHubInstall = true,
                 memoryTools = memoryContext.enabled,
                 memoryWritable = roleplayContext == null,
                 capabilities = capabilities,
                 localWebSearch = !config.usesHostedWebSearch,
-            )
+            ).let { full -> if (compactTools) AgentToolSearch.compact(full) else full }
+            // 运行内解锁的工具会与原目录重名（例如核心工具），按名字去重。
+            val declared = mutableSetOf<String>()
+            for (index in 0 until tools.length()) {
+                toolName(tools.getJSONObject(index))?.let(declared::add)
+            }
             for (index in 0 until additionalTools.length()) {
-                tools.put(additionalTools.opt(index))
+                val extra = additionalTools.optJSONObject(index) ?: continue
+                val name = toolName(extra) ?: continue
+                if (!declared.add(name)) continue
+                tools.put(extra)
             }
             return tools
         }
