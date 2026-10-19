@@ -549,7 +549,7 @@ internal class McpHttpClient(
         const val MAX_ERROR_CHARS = 200
         const val MAX_TITLE_CHARS = 160
         const val MAX_DESCRIPTION_CHARS = 2_000
-        const val MAX_DISCOVERED_TOOLS = 128
+        const val MAX_DISCOVERED_TOOLS = 256
         const val MAX_LIST_PAGES = 8
         val SUPPORTED_LEGACY_PROTOCOL_VERSIONS = setOf(
             "2024-11-05",

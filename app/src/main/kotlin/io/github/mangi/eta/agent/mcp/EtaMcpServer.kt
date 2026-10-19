@@ -152,6 +152,20 @@ internal class EtaMcpServer(
                 .put("type", "text")
                 .put("text", "${outcome.content}\n\n[elapsed=${elapsed}ms]"))
         }
+        outcome.images.forEach { image ->
+            val dataUrl = image.reference
+            val comma = dataUrl.indexOf(',')
+            if (dataUrl.startsWith("data:") && comma > 0 && dataUrl.length - comma <= MAX_INLINE_IMAGE_CHARS) {
+                content.put(JSONObject()
+                    .put("type", "image")
+                    .put("data", dataUrl.substring(comma + 1))
+                    .put("mimeType", image.mimeType))
+            } else if (dataUrl.startsWith("data:") && comma > 0) {
+                content.put(JSONObject()
+                    .put("type", "text")
+                    .put("text", "截图共 ${image.bytes} 字节，超过 MCP 单次内联上限，已省略图像内容。"))
+            }
+        }
         val responsePayload = JSONObject()
             .put("resultType", "complete")
             .put("content", content)
@@ -261,6 +275,9 @@ internal class EtaMcpServer(
         )
 
         val READ_ONLY_PREFIXES = listOf("search_", "get_", "list_", "recent_", "top_")
+
+        /** 单张截图内部内联上限，防止超大 base64 撑爆 MCP 响应。 */
+        const val MAX_INLINE_IMAGE_CHARS = 8 * 1024 * 1024
 
         val READ_ONLY_TOOLS = setOf(
             "observe_screen", "ocr_screen", "ocr_image", "read_image",
