@@ -33,8 +33,8 @@ class AgentFileVisionToolCatalogTest {
     private fun readImageFunction(): JSONObject {
         val tools = AgentToolCatalog.build(terminalTools = true, browserTools = false)
         return (0 until tools.length())
-            .map(tools::getJSONObject)
-            .first { it.getJSONObject("function").getString("name") == "read_image" }
+            .map { tools.getJSONObject(it).getJSONObject("function") }
+            .first { it.getString("name") == "read_image" }
     }
 
     private fun readImageDescription(): String = readImageFunction().getString("description")

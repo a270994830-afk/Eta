@@ -118,11 +118,6 @@ internal object AgentRuntimeWire {
     private const val KEY_CUSTOM_HEADERS_JSON = "custom_headers_json"
     private const val KEY_CUSTOM_BODY_JSON = "custom_body_json"
     private const val KEY_IMAGES = "images"
-    private const val KEY_HISTORY = "history"
-    private const val KEY_CONTENT_JSON = "content_json"
-    private const val KEY_TOOL_CALL_ID = "tool_call_id"
-    private const val KEY_TOOL_CALLS_JSON = "tool_calls_json"
-    private const val KEY_ROLE = "role"
     private const val KEY_DATA_URL = "data_url"
     private const val KEY_IMAGE_URL = "image_url"
     private const val KEY_IMAGE_FD = "image_fd"
@@ -323,19 +318,6 @@ internal object AgentRuntimeWire {
         putString(KEY_CUSTOM_BODY_JSON, json.encodeToString(request.config.customBody))
         request.handoff?.let { putBundle(KEY_HANDOFF, toBundle(it)) }
         putParcelableArrayList(
-            KEY_HISTORY,
-            ArrayList(AgentConversationCodec.decodeTranscript(AgentLegacyConversationProjection.encode(request.history, AgentLegacyConversationProjection.DIRECT_CHARS)).map { message ->
-                Bundle().apply {
-                    putString(KEY_ROLE, message.role)
-                    putString(KEY_CONTENT, message.content)
-                    putString(KEY_CONTENT_JSON, message.contentJson)
-                    putString(KEY_TOOL_CALL_ID, message.toolCallId)
-                    putString(KEY_REASONING_CONTENT, message.reasoningContent)
-                    putString(KEY_TOOL_CALLS_JSON, message.toolCallsJson)
-                }
-            })
-        )
-        putParcelableArrayList(
             KEY_IMAGES,
             ArrayList(imageBundles)
         )
@@ -475,17 +457,7 @@ internal object AgentRuntimeWire {
                 customHeaders = decodeCustomHeaders(bundle.getString(KEY_CUSTOM_HEADERS_JSON)),
                 customBody = decodeCustomBody(bundle.getString(KEY_CUSTOM_BODY_JSON))
             ),
-            history = if (!readText) emptyList() else AgentWireText.read(bundle, "history_json")?.let(AgentConversationCodec::decodeTranscript)
-                ?: bundle.getParcelableArrayList(KEY_HISTORY, Bundle::class.java).orEmpty().map { message ->
-                AgentModelClient.ConversationMessage(
-                    role = message.getString(KEY_ROLE).orEmpty(),
-                    content = message.getString(KEY_CONTENT).orEmpty(),
-                    contentJson = message.getString(KEY_CONTENT_JSON).orEmpty(),
-                    toolCallId = message.getString(KEY_TOOL_CALL_ID).orEmpty(),
-                    reasoningContent = message.getString(KEY_REASONING_CONTENT).orEmpty(),
-                    toolCallsJson = message.getString(KEY_TOOL_CALLS_JSON).orEmpty(),
-                )
-            },
+            history = if (!readText) emptyList() else AgentWireText.read(bundle, "history_json")?.let(AgentConversationCodec::decodeTranscript).orEmpty(),
             images = images,
             handoff = bundle.getBundle(KEY_HANDOFF)?.let(::entryHandoffFromBundle)
         )

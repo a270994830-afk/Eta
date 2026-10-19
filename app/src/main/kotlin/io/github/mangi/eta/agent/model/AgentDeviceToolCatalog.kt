@@ -97,16 +97,6 @@ internal object AgentDeviceToolCatalog {
             )
             .put(
                 function(
-                    "web_search",
-                    "快速网页搜索：把关键词交给系统搜索并展示结果。需要给用户看搜索结果时优先使用本工具。",
-                    properties(
-                        "query" to string("搜索关键词", 200),
-                    ),
-                    "query",
-                ),
-            )
-            .put(
-                function(
                     "open_device_action",
                     "一键打开常用系统页面：相机、拨号、设置、WiFi、蓝牙、闹钟、浏览器。",
                     properties(
@@ -207,16 +197,6 @@ internal object AgentDeviceToolCatalog {
                         "body" to string("短信内容", 500),
                     ),
                     "to", "body",
-                ),
-            )
-            .put(
-                function(
-                    "set_brightness",
-                    "设置屏幕亮度（0-100）。需要“修改系统设置”权限。",
-                    properties(
-                        "level" to integer("0 到 100 的亮度百分比", 0, 100),
-                    ),
-                    "level",
                 ),
             )
     }
@@ -402,23 +382,6 @@ internal object AgentDeviceToolCatalog {
                         "user_id" to userId(),
                     ),
                     "package_name", "action",
-                ),
-            )
-            .put(
-                function(
-                    "create_calendar_event",
-                    "在系统日历中新建日程。时间为设备本地时间：start/end 用「yyyy-MM-dd HH:mm」或带时区的 ISO 8601，all_day 时 end 传最后一天的日期；涉及相对日期时先用 get_current_context 换算。仅在用户明确要求写入日历时使用。",
-                    properties(
-                        "title" to string("日程标题，最多 200 字", 200),
-                        "start" to string("开始时间，如 2026-09-24 15:00 或 2026-09-24T15:00:00+08:00", 64),
-                        "end" to string("可选结束时间；all_day 时为最后一天日期；不传则按 duration_minutes 计算", 64),
-                        "duration_minutes" to integer("未传 end 时的时长分钟，默认 60", 1, 43_200),
-                        "all_day" to boolean("是否全天日程，默认 false"),
-                        "location" to string("可选地点，最多 200 字", 200),
-                        "description" to string("可选说明，最多 2000 字", 2_000),
-                        "reminder_minutes" to integer("提前提醒分钟数，0 为不提醒，默认 0", 0, 40_320),
-                    ),
-                    "title", "start",
                 ),
             )
     }

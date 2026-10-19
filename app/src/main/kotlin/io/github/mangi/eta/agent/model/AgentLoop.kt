@@ -179,16 +179,14 @@ internal class AgentLoop(
 
             if (toolCalls.isNotEmpty()) {
                 val outcomes = toolCalls.map { call ->
+                    // 不少模型/网关在带 tool_calls 的回复里仍报 finish_reason=stop，
+                    // 以是否返回工具调用为准，仅截断的调用不可执行。
                     val outcome = when (providerResponse.stopReason) {
-                        AssistantStopReason.TOOL_USE -> executeTool(round, call)
                         AssistantStopReason.OUTPUT_LIMIT -> rejectedToolOutcome(
                             round, call, "TRUNCATED_TOOL_CALL",
                             "模型输出达到长度上限，工具参数可能不完整；本次调用未执行，请重新提交完整参数。",
                         )
-                        else -> rejectedToolOutcome(
-                            round, call, "UNEXPECTED_TOOL_CALL",
-                            "模型在 ${providerResponse.stopReason.name} 终止状态下返回了工具调用；本批调用未执行，请重新规划。",
-                        )
+                        else -> executeTool(round, call)
                     }
                     appendMessage(AgentConversationCodec.toolResultMessage(outcome.call, outcome.result))
                     publishTranscript()
